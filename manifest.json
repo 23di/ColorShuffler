@@ -1,0 +1,15 @@
+{
+  "name": "Color Shuffler Light",
+  "id": "oklch-tools",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "main": "dist/code.js",
+  "ui": "dist/index.html",
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  },
+  "documentAccess": "dynamic-page",
+  "permissions": ["currentuser"],
+  "capabilities": [],
+  "enableProposedApi": false
+}
