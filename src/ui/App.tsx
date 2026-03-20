@@ -69,10 +69,21 @@ type HueScopeId = "all" | string | null;
 type SecondaryHueRelation = "manual" | "complement" | "analog-plus" | "analog-minus" | "triad";
 type ExtraHueGroupLinkMode =
   | "manual"
+  | "monochrome"
   | "complement"
   | "analog-plus"
+  | "analog-wide-plus"
   | "analog-minus"
-  | "triad";
+  | "analog-wide-minus"
+  | "triad"
+  | "triad-minus"
+  | "split-plus"
+  | "split-minus"
+  | "square-plus"
+  | "square-minus"
+  | "tetrad-plus"
+  | "tetrad-opposite"
+  | "tetrad-minus";
 type AnalysisColor = SelectionAnalysisSummary["colors"][number];
 type FrameGroup = Pick<FamilySummary, "id" | "name" | "type" | "memberKeys" | "usageCount" | "hue">;
 type ExtraHueGroup = {
@@ -174,11 +185,49 @@ function relationHueOffset(relation: SecondaryHueRelation): number {
   }
 }
 
+function extraHueGroupOffset(relation: ExtraHueGroupLinkMode): number {
+  switch (relation) {
+    case "monochrome":
+      return 0;
+    case "complement":
+      return 180;
+    case "analog-plus":
+      return 30;
+    case "analog-wide-plus":
+      return 60;
+    case "analog-minus":
+      return -30;
+    case "analog-wide-minus":
+      return -60;
+    case "triad":
+      return 120;
+    case "triad-minus":
+      return -120;
+    case "split-plus":
+      return 150;
+    case "split-minus":
+      return -150;
+    case "square-plus":
+      return 90;
+    case "square-minus":
+      return -90;
+    case "tetrad-plus":
+      return 60;
+    case "tetrad-opposite":
+      return 180;
+    case "tetrad-minus":
+      return -120;
+    case "manual":
+    default:
+      return 0;
+  }
+}
+
 function resolveExtraHueGroupShift(group: ExtraHueGroup, primaryHueShift: number): number {
   if (group.linkMode === "manual") {
     return group.hueShift;
   }
-  return absoluteHueToSigned(normalizeHue(primaryHueShift + relationHueOffset(group.linkMode)));
+  return absoluteHueToSigned(normalizeHue(primaryHueShift + extraHueGroupOffset(group.linkMode)));
 }
 
 function resolveExtraHueGroupRelativeShift(
@@ -200,12 +249,28 @@ function resolveAutoPairingValues(
   chromaScale: number;
 } {
   switch (group.linkMode) {
+    case "monochrome":
+      return { exposure: 0, chromaScale: 0.78 };
     case "analog-plus":
     case "analog-minus":
       return { exposure: 0, chromaScale: 0.82 };
+    case "analog-wide-plus":
+    case "analog-wide-minus":
+      return { exposure: 1, chromaScale: 0.88 };
+    case "split-plus":
+    case "split-minus":
+      return { exposure: 2, chromaScale: 0.94 };
+    case "square-plus":
+    case "square-minus":
+    case "tetrad-opposite":
+      return { exposure: 2, chromaScale: 0.96 };
+    case "tetrad-plus":
+    case "tetrad-minus":
+      return { exposure: 2, chromaScale: 0.98 };
     case "complement":
       return { exposure: 2, chromaScale: 0.92 };
     case "triad":
+    case "triad-minus":
       return { exposure: 3, chromaScale: 1.02 };
     case "manual":
     default: {
@@ -1629,10 +1694,21 @@ function App() {
                                   }
                                   options={[
                                     { value: "manual", label: "Free" },
+                                    { value: "monochrome", label: "Monochrome" },
                                     { value: "complement", label: "Complementary" },
+                                    { value: "split-plus", label: "Split comp +" },
+                                    { value: "split-minus", label: "Split comp -" },
                                     { value: "analog-plus", label: "Analog +" },
+                                    { value: "analog-wide-plus", label: "Analog wide +" },
                                     { value: "analog-minus", label: "Analog -" },
+                                    { value: "analog-wide-minus", label: "Analog wide -" },
                                     { value: "triad", label: "Triad" },
+                                    { value: "triad-minus", label: "Triad -" },
+                                    { value: "square-plus", label: "Square +" },
+                                    { value: "square-minus", label: "Square -" },
+                                    { value: "tetrad-plus", label: "Tetrad +" },
+                                    { value: "tetrad-opposite", label: "Tetrad opposite" },
+                                    { value: "tetrad-minus", label: "Tetrad -" },
                                   ]}
                                 />
                                 <button
