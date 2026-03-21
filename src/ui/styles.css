@@ -24,6 +24,7 @@
 html, body, #root {
   width: 100%;
   height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
@@ -35,9 +36,40 @@ html, body, #root {
 .shell {
   position: relative;
   display: flex;
+  height: 100%;
   flex-direction: column;
-  background: var(--bg);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-2) 58%, transparent) transparent;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--figma-color-bg-secondary, var(--bg-2)) 18%, var(--bg)),
+      var(--bg)
+    );
   color: var(--text);
+}
+
+.shell::-webkit-scrollbar {
+  width: 10px;
+}
+
+.shell::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.shell::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-2) 58%, transparent);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.shell::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 44%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .content {
@@ -90,7 +122,7 @@ html, body, #root {
 
 /* ── Section ────────────────────────────────────────────────────────────────── */
 .section {
-  padding: 12px 12px;
+  padding: 12px 12px 2px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -757,7 +789,7 @@ html, body, #root {
 .control-stack {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .hue-cluster {
@@ -778,7 +810,7 @@ html, body, #root {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 10px;
   background: var(--bg-2);
 }
@@ -792,19 +824,97 @@ html, body, #root {
     );
 }
 
+.hue-group-card.is-neutral-card,
+.main-controls-card {
+  background: var(--bg-2);
+}
+
 .hue-group-header,
 .extra-hue-picker-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.hue-group-header {
+  justify-content: flex-start;
+}
+
+.extra-hue-picker-head {
+  justify-content: space-between;
 }
 
 .hue-group-copy,
 .hue-group-actions,
 .extra-hue-picker-head {
   min-width: 0;
+}
+
+.hue-group-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.group-toggle.group-toggle-static {
+  cursor: default;
+}
+
+.group-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-2);
+  transition: transform 0.14s ease;
+}
+
+.group-chevron.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.group-chevron-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  appearance: none;
+  -webkit-appearance: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.group-chevron-btn.icon-btn-plain,
+.group-chevron-btn.icon-btn-plain:hover,
+.group-chevron-btn.icon-btn-plain:focus,
+.group-chevron-btn.icon-btn-plain:focus-visible,
+.group-chevron-btn.icon-btn-plain:active {
+  background: transparent;
+  border: 0;
+  outline: none;
+  box-shadow: none;
 }
 
 .hue-group-copy {
@@ -820,13 +930,17 @@ html, body, #root {
 }
 
 .hue-group-copy strong {
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .main-controls {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.main-controls-header {
+  align-items: center;
 }
 
 .main-controls-disabled {
@@ -877,13 +991,17 @@ html, body, #root {
   align-items: center;
 }
 
+.range-label {
+  min-width: 0;
+  color: var(--text-2);
+}
+
 .range-meta {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.range-head span { color: var(--text-2); }
 .range-head strong { font-weight: 500; font-size: 11px; }
 
 .range-field input[type="range"] {
@@ -1027,6 +1145,42 @@ html, body, #root {
   gap: 0;
 }
 
+.select-field-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.select-field.is-unstyled select {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.4;
+  appearance: none;
+  -webkit-appearance: none;
+  text-indent: 0;
+}
+
+.select-field.is-unstyled .select-field-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  pointer-events: none;
+  flex: 0 0 auto;
+  margin-left: -1px;
+}
+
+.select-field.is-unstyled .select-field-chevron .icon-svg {
+  width: 10px;
+  height: 10px;
+}
+
 .select-field select {
   min-width: 134px;
   height: 24px;
@@ -1161,12 +1315,13 @@ button:disabled {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 0 12px 10px;
+  padding: 10px 12px 10px;
   margin-top: auto;
   flex-shrink: 0;
   position: sticky;
   bottom: 0;
   z-index: 3;
+  background: var(--bg);
 }
 
 .footer-status {
@@ -1180,7 +1335,7 @@ button:disabled {
 }
 
 .window-resizer {
-  position: absolute;
+  position: fixed;
   right: 4px;
   bottom: 4px;
   width: 14px;

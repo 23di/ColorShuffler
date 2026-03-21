@@ -1,10 +1,5 @@
-import {
-  Hct,
-  argbFromRgb,
-  blueFromArgb,
-  greenFromArgb,
-  redFromArgb,
-} from "@material/material-color-utilities";
+import { converter } from "culori";
+import type { Oklch as CuloriOklch, Rgb as CuloriRgb } from "culori";
 import {
   type ColorRecordSummary,
   type ColorRole,
@@ -29,6 +24,14 @@ const HUE_FAMILIES = [
   { id: "rose", label: "Rose", hue: 350 },
 ];
 
+const toOklch = converter("oklch");
+const toRgb = converter("rgb");
+const NEUTRAL_CLUSTER_ABSOLUTE_CAP = 0.035;
+const NEUTRAL_CLUSTER_SEED_CAP = 0.018;
+const NEUTRAL_CLUSTER_GAP = 0.012;
+const NEUTRAL_THRESHOLD_BUFFER = 0.001;
+const MIN_NEUTRAL_THRESHOLD = 0.001;
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -38,12 +41,56 @@ export function clamp01(value: number): number {
 }
 
 export function normalizeNeutralThreshold(value: number): number {
-  const clamped = Math.max(0, value);
-  return Math.min(0.18, Math.max(clamped, clamped * 2.2));
+  return clamp(value, 0, 0.18);
 }
 
 export function isNearNeutralChroma(chroma: number, threshold: number): boolean {
   return chroma < normalizeNeutralThreshold(threshold);
+}
+
+export function deriveNeutralThreshold(
+  colors: Array<Pick<ColorRecordSummary, "oklch">>,
+): number {
+  const chromas = colors
+    .map((color) => Math.max(0, color.oklch.c))
+    .sort((left, right) => left - right);
+
+  if (chromas.length === 0) {
+    return MIN_NEUTRAL_THRESHOLD;
+  }
+
+  const initialClusterEnd = chromas.findIndex((chroma) => chroma > NEUTRAL_CLUSTER_SEED_CAP);
+  if (initialClusterEnd === 0) {
+    return MIN_NEUTRAL_THRESHOLD;
+  }
+
+  let clusterEndIndex =
+    initialClusterEnd === -1 ? chromas.length - 1 : Math.max(0, initialClusterEnd - 1);
+
+  while (clusterEndIndex + 1 < chromas.length) {
+    const current = chromas[clusterEndIndex];
+    const next = chromas[clusterEndIndex + 1];
+    if (next > NEUTRAL_CLUSTER_ABSOLUTE_CAP || next - current >= NEUTRAL_CLUSTER_GAP) {
+      break;
+    }
+    clusterEndIndex += 1;
+  }
+
+  const clusterMax = chromas[clusterEndIndex];
+  const next = chromas[clusterEndIndex + 1];
+  const hasSeparation =
+    next !== undefined &&
+    (next > NEUTRAL_CLUSTER_ABSOLUTE_CAP || next - clusterMax >= NEUTRAL_CLUSTER_GAP);
+
+  if (!hasSeparation && clusterMax > NEUTRAL_CLUSTER_SEED_CAP) {
+    return MIN_NEUTRAL_THRESHOLD;
+  }
+
+  return clamp(
+    clusterMax + NEUTRAL_THRESHOLD_BUFFER,
+    MIN_NEUTRAL_THRESHOLD,
+    NEUTRAL_CLUSTER_ABSOLUTE_CAP,
+  );
 }
 
 export function lerp(from: number, to: number, amount: number): number {
@@ -176,7 +223,7 @@ export function hslToRgb(color: HslColor): SerializedColor {
 }
 
 export function oklchToCss(color: OklchColor): string {
-  return `hct(${(color.l * 100).toFixed(1)} ${(
+  return `oklch(${(color.l * 100).toFixed(1)}% ${(
     color.c * 100
   ).toFixed(1)} ${normalizeHue(color.h).toFixed(1)})`;
 }
@@ -184,16 +231,17 @@ export function oklchToCss(color: OklchColor): string {
 export const hctToCss = oklchToCss;
 
 export function rgbToOklch(color: SerializedColor): OklchColor {
-  const argb = argbFromRgb(
-    Math.round(clamp01(color.r) * 255),
-    Math.round(clamp01(color.g) * 255),
-    Math.round(clamp01(color.b) * 255),
-  );
-  const converted = Hct.fromInt(argb);
+  const converted = toOklch({
+    mode: "rgb",
+    r: clamp01(color.r),
+    g: clamp01(color.g),
+    b: clamp01(color.b),
+    alpha: clamp01(color.a),
+  }) as CuloriOklch | undefined;
   return {
-    l: clamp01((converted.tone ?? 0) / 100),
-    c: Math.max(0, (converted.chroma ?? 0) / 100),
-    h: normalizeHue(converted.hue ?? 0),
+    l: clamp01(converted?.l ?? 0),
+    c: Math.max(0, converted?.c ?? 0),
+    h: normalizeHue(converted?.h ?? 0),
     alpha: clamp01(color.a),
   };
 }
@@ -201,15 +249,17 @@ export function rgbToOklch(color: SerializedColor): OklchColor {
 export const rgbToHct = rgbToOklch;
 
 function rawOklchToRgb(color: OklchColor): SerializedColor {
-  const converted = Hct.from(
-    normalizeHue(color.h),
-    Math.max(0, color.c) * 100,
-    clamp01(color.l) * 100,
-  ).toInt();
+  const converted = toRgb({
+    mode: "oklch",
+    l: clamp01(color.l),
+    c: Math.max(0, color.c),
+    h: normalizeHue(color.h),
+    alpha: clamp01(color.alpha),
+  }) as CuloriRgb | undefined;
   return {
-    r: redFromArgb(converted) / 255,
-    g: greenFromArgb(converted) / 255,
-    b: blueFromArgb(converted) / 255,
+    r: converted?.r ?? 0,
+    g: converted?.g ?? 0,
+    b: converted?.b ?? 0,
     a: clamp01(color.alpha),
   };
 }
@@ -307,7 +357,7 @@ export function familyFromHue(hue: number | null, chroma: number): {
   id: string;
   name: string;
 } {
-  if (hue === null || chroma < 0.03) {
+  if (hue === null || chroma <= 0) {
     return { id: "neutral", name: "Neutral" };
   }
 

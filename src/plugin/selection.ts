@@ -10,11 +10,6 @@ import {
   rgbToOklch,
 } from "../shared/color";
 import { calculateApcaContrast } from "../shared/apca";
-import {
-  resolveThemeTargetDirection,
-  solveThemeTextColor,
-  transformThemeSurfaceRgb,
-} from "../shared/theme-switcher";
 import type {
   ColorMappingEntry,
   OklchColor,
@@ -24,7 +19,6 @@ import type {
   ThemeColorContext,
   ThemeDetectionSummary,
   ThemeTextPriority,
-  ThemeSwitcherSettings,
 } from "../shared/types";
 
 type PaintProperty = "fills" | "strokes";
@@ -780,184 +774,6 @@ function textSegmentKey(start: number, end: number): string {
   return `${start}:${end}`;
 }
 
-function isSceneNodeCandidate(node: BaseNode | null): node is SceneNode {
-  return Boolean(node && "visible" in node && "removed" in node && "parent" in node);
-}
-
-function blendChannel(background: number, foreground: number, alpha: number): number {
-  return foreground * alpha + background * (1 - alpha);
-}
-
-function blendOver(
-  background: SerializedColor,
-  foreground: SerializedColor,
-): SerializedColor {
-  const alpha = Math.max(0, Math.min(1, foreground.a));
-  return {
-    r: blendChannel(background.r, foreground.r, alpha),
-    g: blendChannel(background.g, foreground.g, alpha),
-    b: blendChannel(background.b, foreground.b, alpha),
-    a: 1,
-  };
-}
-
-function defaultThemeBackground(targetDirection: "light" | "dark"): SerializedColor {
-  return targetDirection === "light"
-    ? { r: 1, g: 1, b: 1, a: 1 }
-    : { r: 0, g: 0, b: 0, a: 1 };
-}
-
-function transformThemePaint(
-  paint: Paint,
-  sourceKinds: SourceKind[],
-  summary: SelectionAnalysisSummary,
-  settings: ThemeSwitcherSettings,
-  targetDirection: "light" | "dark",
-): Paint {
-  if (!paintVisible(paint)) return paint;
-  if (isSolidPaint(paint)) {
-    return applySolidPaint(
-      paint,
-      transformThemeSurfaceRgb(
-        figmaColorToSerialized(paint.color, paint.opacity ?? 1),
-        settings,
-        targetDirection,
-        { sourceKinds, summary },
-      ),
-    );
-  }
-  if (isGradientPaint(paint)) {
-    return {
-      ...paint,
-      gradientStops: paint.gradientStops.map((stop) => {
-        const transformed = transformThemeSurfaceRgb(
-          figmaColorToSerialized(stop.color, stop.color.a),
-          settings,
-          targetDirection,
-          { sourceKinds, summary },
-        );
-        const { boundVariables: _boundVariables, ...restStop } = stop as ColorStop & {
-          boundVariables?: ColorStop["boundVariables"];
-        };
-        return {
-          ...restStop,
-          color: {
-            r: transformed.r,
-            g: transformed.g,
-            b: transformed.b,
-            a: transformed.a,
-          },
-        };
-      }),
-    };
-  }
-  return paint;
-}
-
-function transformThemeTextPaint(
-  paint: Paint,
-  background: SerializedColor,
-  summary: SelectionAnalysisSummary,
-  settings: ThemeSwitcherSettings,
-  priority: ThemeTextPriority,
-): Paint {
-  const targetLc =
-    priority === "secondary" ? settings.secondaryTargetLc : settings.primaryTargetLc;
-  if (!paintVisible(paint)) return paint;
-  if (isSolidPaint(paint)) {
-    return applySolidPaint(
-      paint,
-      solveThemeTextColor(
-        figmaColorToSerialized(paint.color, paint.opacity ?? 1),
-        background,
-        targetLc,
-        summary,
-        settings,
-      ),
-    );
-  }
-  if (isGradientPaint(paint)) {
-    return {
-      ...paint,
-      gradientStops: paint.gradientStops.map((stop) => {
-        const transformed = solveThemeTextColor(
-          figmaColorToSerialized(stop.color, stop.color.a),
-          background,
-          targetLc,
-          summary,
-          settings,
-        );
-        const { boundVariables: _boundVariables, ...restStop } = stop as ColorStop & {
-          boundVariables?: ColorStop["boundVariables"];
-        };
-        return {
-          ...restStop,
-          color: {
-            r: transformed.r,
-            g: transformed.g,
-            b: transformed.b,
-            a: transformed.a,
-          },
-        };
-      }),
-    };
-  }
-  return paint;
-}
-
-function dominantVisiblePaintColor(
-  paints: ReadonlyArray<Paint>,
-  background: SerializedColor,
-): SerializedColor | null {
-  for (let index = paints.length - 1; index >= 0; index -= 1) {
-    const paint = paints[index];
-    if (!paintVisible(paint)) continue;
-    if (isSolidPaint(paint)) {
-      return blendOver(
-        background,
-        figmaColorToSerialized(paint.color, paint.opacity ?? 1),
-      );
-    }
-    if (isGradientPaint(paint)) {
-      return blendOver(background, averageGradientPaint(paint));
-    }
-  }
-  return null;
-}
-
-function hasVisiblePaints(paints: ReadonlyArray<Paint> | undefined): boolean {
-  return Array.isArray(paints) && paints.some((paint) => paintVisible(paint));
-}
-
-function averageVisiblePaintColor(paints: ReadonlyArray<Paint> | undefined): SerializedColor | null {
-  if (!Array.isArray(paints)) return null;
-  const colors: SerializedColor[] = [];
-  for (const paint of paints) {
-    if (!paintVisible(paint)) continue;
-    if (isSolidPaint(paint)) {
-      colors.push(figmaColorToSerialized(paint.color, paint.opacity ?? 1));
-      continue;
-    }
-    if (isGradientPaint(paint)) {
-      colors.push(averageGradientPaint(paint));
-    }
-  }
-  return colors.length > 0 ? averageColor(colors) : null;
-}
-
-function isColorNearBackground(
-  color: SerializedColor | null,
-  background: SerializedColor,
-): boolean {
-  if (!color) return false;
-  const source = rgbToOklch(color);
-  const target = rgbToOklch(background);
-  const hueGap = Math.min(Math.abs(source.h - target.h), 360 - Math.abs(source.h - target.h)) / 180;
-  const chromaGap = Math.abs(source.c - target.c) / 0.08;
-  const lightnessGap = Math.abs(source.l - target.l) / 0.12;
-  return hueGap + chromaGap + lightnessGap < 1.35;
-}
-
 function ensureMutablePaints(
   state: MutableNodeState,
   property: PaintProperty,
@@ -1005,6 +821,15 @@ function ensureMutableTextSegments(
   return state.textSegmentIndex;
 }
 
+function isMissingNodeMutationError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes("does not exist") || message.includes("node not found");
+}
+
 export async function restoreSelection(
   analysis: SelectionAnalysisInternal,
 ): Promise<number> {
@@ -1012,35 +837,39 @@ export async function restoreSelection(
   for (const state of analysis.originalStates.values()) {
     const node = await figma.getNodeByIdAsync(state.nodeId);
     if (!node || node.removed) continue;
-    if (node.type === "TEXT") {
-      await ensureFontsLoaded(state.fonts);
-    }
-    if (state.fills && "fills" in node) {
-      node.fills = clonePaints(state.fills);
-      if ("fillStyleId" in node && state.fillStyleId !== undefined) {
-        try { (node as SceneNode & { fillStyleId: typeof state.fillStyleId }).fillStyleId = state.fillStyleId; } catch {}
+    try {
+      if (node.type === "TEXT") {
+        await ensureFontsLoaded(state.fonts);
       }
-      restored += 1;
-    }
-    if (state.strokes && "strokes" in node) {
-      node.strokes = clonePaints(state.strokes);
-      if ("strokeStyleId" in node && state.strokeStyleId !== undefined) {
-        try { (node as SceneNode & { strokeStyleId: string }).strokeStyleId = state.strokeStyleId as string; } catch {}
-      }
-      restored += 1;
-    }
-    if (state.effects && "effects" in node) {
-      node.effects = cloneEffects(state.effects);
-      if ("effectStyleId" in node && state.effectStyleId !== undefined) {
-        try { (node as SceneNode & { effectStyleId: string }).effectStyleId = state.effectStyleId as string; } catch {}
-      }
-      restored += 1;
-    }
-    if (state.textSegments && node.type === "TEXT") {
-      for (const segment of state.textSegments) {
-        node.setRangeFills(segment.start, segment.end, clonePaints(segment.fills));
+      if (state.fills && "fills" in node) {
+        node.fills = clonePaints(state.fills);
+        if ("fillStyleId" in node && state.fillStyleId !== undefined) {
+          try { (node as SceneNode & { fillStyleId: typeof state.fillStyleId }).fillStyleId = state.fillStyleId; } catch {}
+        }
         restored += 1;
       }
+      if (state.strokes && "strokes" in node) {
+        node.strokes = clonePaints(state.strokes);
+        if ("strokeStyleId" in node && state.strokeStyleId !== undefined) {
+          try { (node as SceneNode & { strokeStyleId: string }).strokeStyleId = state.strokeStyleId as string; } catch {}
+        }
+        restored += 1;
+      }
+      if (state.effects && "effects" in node) {
+        node.effects = cloneEffects(state.effects);
+        restored += 1;
+      }
+      if (state.textSegments && node.type === "TEXT") {
+        for (const segment of state.textSegments) {
+          node.setRangeFills(segment.start, segment.end, clonePaints(segment.fills));
+          restored += 1;
+        }
+      }
+    } catch (error) {
+      if (isMissingNodeMutationError(error)) {
+        continue;
+      }
+      throw error;
     }
   }
   return restored;
@@ -1148,247 +977,43 @@ export async function applyColorMapping(
   for (const state of nextStates.values()) {
     const node = await figma.getNodeByIdAsync(state.nodeId);
     if (!node || node.removed) continue;
-    if (node.type === "TEXT") {
-      await ensureFontsLoaded(state.fonts);
-    }
-    if (state.fills && "fills" in node) {
-      if ("fillStyleId" in node) {
-        try { node.fillStyleId = ""; } catch {}
+    try {
+      if (node.type === "TEXT") {
+        await ensureFontsLoaded(state.fonts);
       }
-      node.fills = state.fills;
-      updated += 1;
-    }
-    if (state.strokes && "strokes" in node) {
-      if ("strokeStyleId" in node) {
-        try { node.strokeStyleId = ""; } catch {}
-      }
-      node.strokes = state.strokes;
-      updated += 1;
-    }
-    if (state.effects && "effects" in node) {
-      if ("effectStyleId" in node) {
-        try { node.effectStyleId = ""; } catch {}
-      }
-      node.effects = state.effects;
-      updated += 1;
-    }
-    if (state.textSegments && node.type === "TEXT") {
-      for (const segment of state.textSegments) {
-        node.setRangeFills(segment.start, segment.end, segment.fills);
+      if (state.fills && "fills" in node) {
+        if ("fillStyleId" in node) {
+          try { node.fillStyleId = ""; } catch {}
+        }
+        node.fills = state.fills;
         updated += 1;
       }
-    }
-  }
-
-  return updated;
-}
-
-async function applyThemeToNodeTree(
-  node: SceneNode,
-  analysis: SelectionAnalysisInternal,
-  settings: ThemeSwitcherSettings,
-  targetDirection: "light" | "dark",
-  inheritedBackground: SerializedColor,
-): Promise<number> {
-  if (node.removed || ("visible" in node && node.visible === false)) {
-    return 0;
-  }
-
-  const state = analysis.originalStates.get(node.id);
-  let updated = 0;
-  let currentBackground = inheritedBackground;
-
-  if (node.type === "TEXT") {
-    await ensureFontsLoaded(state?.fonts);
-  }
-
-  if (node.type === "TEXT") {
-    if (state?.fills && Array.isArray(node.fills)) {
-      const contrast = state.fills
-        .map((paint) => {
-          if (!paintVisible(paint)) return 0;
-          if (isSolidPaint(paint)) {
-            return calculateApcaContrast(
-              figmaColorToSerialized(paint.color, paint.opacity ?? 1),
-              inheritedBackground,
-            );
-          }
-          if (isGradientPaint(paint)) {
-            return calculateApcaContrast(averageGradientPaint(paint), inheritedBackground);
-          }
-          return 0;
-        })
-        .reduce((sum, value) => sum + value, 0);
-      const priority = resolveTextPriority(contrast);
-      node.fills = state.fills.map((paint) =>
-        transformThemeTextPaint(paint, inheritedBackground, analysis.summary, settings, priority),
-      );
-      updated += 1;
-    }
-
-    if (state?.textSegments) {
-      for (const segment of state.textSegments) {
-        const contrast = segment.fills
-          .map((paint) => {
-            if (!paintVisible(paint)) return 0;
-            if (isSolidPaint(paint)) {
-              return calculateApcaContrast(
-                figmaColorToSerialized(paint.color, paint.opacity ?? 1),
-                inheritedBackground,
-              );
-            }
-            if (isGradientPaint(paint)) {
-              return calculateApcaContrast(averageGradientPaint(paint), inheritedBackground);
-            }
-            return 0;
-          })
-          .reduce((sum, value) => sum + value, 0);
-        const priority = resolveTextPriority(contrast);
-        node.setRangeFills(
-          segment.start,
-          segment.end,
-          segment.fills.map((paint) =>
-            transformThemeTextPaint(
-              paint,
-              inheritedBackground,
-              analysis.summary,
-              settings,
-              priority,
-            ),
-          ),
-        );
+      if (state.strokes && "strokes" in node) {
+        if ("strokeStyleId" in node) {
+          try { node.strokeStyleId = ""; } catch {}
+        }
+        node.strokes = state.strokes;
         updated += 1;
       }
-    }
-
-    if (state?.strokes && "strokes" in node) {
-      node.strokes = state.strokes.map((paint) =>
-        transformThemePaint(paint, ["stroke"], analysis.summary, settings, targetDirection),
-      );
-      updated += 1;
-    }
-  } else {
-    const originalFillAverage = averageVisiblePaintColor(state?.fills);
-    const originalStrokeAverage = averageVisiblePaintColor(state?.strokes);
-    const swapEligibleByBackground =
-      isColorNearBackground(originalFillAverage, inheritedBackground) ||
-      isColorNearBackground(originalStrokeAverage, inheritedBackground);
-    const canSwapFillStroke =
-      settings.swapFillsAndStrokes &&
-      node.type === "FRAME" &&
-      "fills" in node &&
-      "strokes" in node &&
-      swapEligibleByBackground;
-    const transformedFills = state?.fills
-      ? state.fills.map((paint) =>
-          transformThemePaint(paint, ["fill"], analysis.summary, settings, targetDirection),
-        )
-      : undefined;
-    const transformedStrokes = state?.strokes
-      ? state.strokes.map((paint) =>
-          transformThemePaint(paint, ["stroke"], analysis.summary, settings, targetDirection),
-        )
-      : undefined;
-
-    if (state?.fills && "fills" in node) {
-      if (canSwapFillStroke) {
-        const sourceHasFills = hasVisiblePaints(state.fills);
-        const sourceHasStrokes = hasVisiblePaints(state.strokes);
-        if (sourceHasFills && sourceHasStrokes) {
-          node.fills = transformedStrokes ?? [];
-        } else if (sourceHasStrokes && !sourceHasFills) {
-          node.fills = transformedStrokes ?? [];
-        } else if (sourceHasFills) {
-          node.fills = [];
-        } else {
-          node.fills = transformedFills ?? [];
+      if (state.effects && "effects" in node) {
+        if ("effectStyleId" in node) {
+          try { node.effectStyleId = ""; } catch {}
         }
-      } else {
-        node.fills = transformedFills ?? [];
+        node.effects = state.effects;
+        updated += 1;
       }
-
-      const ownBackground = dominantVisiblePaintColor(node.fills, inheritedBackground);
-      if (ownBackground) currentBackground = ownBackground;
-      updated += 1;
-    }
-
-    if (state?.strokes && "strokes" in node) {
-      if (canSwapFillStroke) {
-        const sourceHasFills = hasVisiblePaints(state.fills);
-        const sourceHasStrokes = hasVisiblePaints(state.strokes);
-        if (sourceHasFills && sourceHasStrokes) {
-          node.strokes = transformedFills ?? [];
-        } else if (sourceHasFills && !sourceHasStrokes) {
-          node.strokes = transformedFills ?? [];
-        } else if (sourceHasStrokes) {
-          node.strokes = [];
-        } else {
-          node.strokes = transformedStrokes ?? [];
+      if (state.textSegments && node.type === "TEXT") {
+        for (const segment of state.textSegments) {
+          node.setRangeFills(segment.start, segment.end, segment.fills);
+          updated += 1;
         }
-      } else {
-        node.strokes = transformedStrokes ?? [];
       }
-      updated += 1;
-    }
-  }
-
-  if (state?.effects && "effects" in node) {
-    node.effects = state.effects.map((effect) => {
-      if (!isShadowEffect(effect) || effect.visible === false || !settings.invertShadows) {
-        return effect;
+    } catch (error) {
+      if (isMissingNodeMutationError(error)) {
+        continue;
       }
-      const transformed = transformThemeSurfaceRgb(
-        figmaColorToSerialized(effect.color, effect.color.a),
-        settings,
-        targetDirection,
-        { sourceKinds: ["effect"], summary: analysis.summary },
-      );
-      return {
-        ...effect,
-        color: {
-          r: transformed.r,
-          g: transformed.g,
-          b: transformed.b,
-          a: effect.color.a,
-        },
-      };
-    });
-    updated += 1;
-  }
-
-  if ("children" in node) {
-    for (const child of node.children) {
-      updated += await applyThemeToNodeTree(
-        child,
-        analysis,
-        settings,
-        targetDirection,
-        currentBackground,
-      );
+      throw error;
     }
-  }
-
-  return updated;
-}
-
-export async function applyThemeHierarchy(
-  analysis: SelectionAnalysisInternal,
-  settings: ThemeSwitcherSettings,
-): Promise<number> {
-  const targetDirection = resolveThemeTargetDirection(analysis.summary, settings);
-  const fallbackBackground = defaultThemeBackground(targetDirection);
-  let updated = 0;
-
-  for (const rootNodeId of analysis.rootNodeIds) {
-    const root = await figma.getNodeByIdAsync(rootNodeId);
-    if (!isSceneNodeCandidate(root) || root.removed || root.type === "SLICE") continue;
-    updated += await applyThemeToNodeTree(
-      root,
-      analysis,
-      settings,
-      targetDirection,
-      fallbackBackground,
-    );
   }
 
   return updated;

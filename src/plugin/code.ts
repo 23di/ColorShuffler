@@ -1,17 +1,16 @@
 declare const __html__: string;
 
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
-import type { PaletteToken, SelectionAnalysisSummary } from "../shared/types";
+import type { SelectionAnalysisSummary } from "../shared/types";
 import {
   applyColorMapping,
-  applyThemeHierarchy,
   extractSelectionAnalysis,
   restoreSelection,
   type SelectionAnalysisInternal,
 } from "./selection";
 
 figma.skipInvisibleInstanceChildren = true;
-const UI_DEFAULT_WIDTH = 430;
+const UI_DEFAULT_WIDTH = 380;
 const UI_MIN_WIDTH = 380;
 const UI_MAX_WIDTH = 760;
 const UI_MIN_HEIGHT = 280;
@@ -24,9 +23,17 @@ figma.showUI(__html__, {
 });
 
 let currentAnalysis: SelectionAnalysisInternal | null = null;
+let baselineAnalysis: SelectionAnalysisInternal | null = null;
 let previewActive = false;
 let uiFocused = true;
 let selectionSignatureOnBlur: string | null = null;
+
+function buildAnalysisRootKey(analysis: SelectionAnalysisInternal | null): string {
+  if (!analysis) {
+    return "empty";
+  }
+  return [...analysis.rootNodeIds].sort().join("|");
+}
 
 function postMessage(message: PluginToUiMessage): void {
   figma.ui.postMessage(message);
@@ -56,7 +63,7 @@ function captureCurrentSelectionSignature(): string {
 
 async function refreshSelection(options?: { preserveCurrentCanvas?: boolean }): Promise<void> {
   if (previewActive && currentAnalysis) {
-    const analysis = currentAnalysis;
+    const analysis = baselineAnalysis ?? currentAnalysis;
     if (options?.preserveCurrentCanvas) {
       previewActive = false;
     } else {
@@ -65,8 +72,10 @@ async function refreshSelection(options?: { preserveCurrentCanvas?: boolean }): 
     }
   }
 
-  currentAnalysis = extractSelectionAnalysis();
+  const nextAnalysis = extractSelectionAnalysis();
+  currentAnalysis = nextAnalysis;
   if (!currentAnalysis) {
+      baselineAnalysis = null;
       postMessage({
         type: "selection-empty",
         message:
@@ -75,59 +84,17 @@ async function refreshSelection(options?: { preserveCurrentCanvas?: boolean }): 
     return;
   }
 
+  if (
+    !baselineAnalysis ||
+    buildAnalysisRootKey(baselineAnalysis) !== buildAnalysisRootKey(currentAnalysis)
+  ) {
+    baselineAnalysis = currentAnalysis;
+  }
+
   postMessage({
     type: "selection-analysis",
     payload: currentAnalysis.summary,
   });
-}
-
-function buildStyleName(groupName: string, token: PaletteToken): string {
-  return groupName ? `${groupName}/${token.name}` : token.name;
-}
-
-function exportVariables(tokens: PaletteToken[], collectionName: string): number {
-  const collection = figma.variables.createVariableCollection(collectionName);
-  const modeId = collection.modes[0]?.modeId;
-  if (!modeId) {
-    throw new Error("Could not create a variable mode for the palette collection.");
-  }
-
-  let created = 0;
-  for (const token of tokens) {
-    const variable = figma.variables.createVariable(token.name, collection, "COLOR");
-    variable.scopes = ["ALL_SCOPES"];
-    variable.setValueForMode(modeId, {
-      r: token.rgb.r,
-      g: token.rgb.g,
-      b: token.rgb.b,
-      a: token.rgb.a,
-    });
-    created += 1;
-  }
-
-  return created;
-}
-
-function exportStyles(tokens: PaletteToken[], styleGroupName: string): number {
-  let created = 0;
-  for (const token of tokens) {
-    const style = figma.createPaintStyle();
-    style.name = buildStyleName(styleGroupName, token);
-    style.paints = [
-      {
-        type: "SOLID",
-        color: {
-          r: token.rgb.r,
-          g: token.rgb.g,
-          b: token.rgb.b,
-        },
-        opacity: token.rgb.a,
-      },
-    ];
-    created += 1;
-  }
-
-  return created;
 }
 
 figma.on("selectionchange", () => {
@@ -139,8 +106,8 @@ figma.on("selectionchange", () => {
 });
 
 figma.on("close", () => {
-  if (previewActive && currentAnalysis) {
-    void restoreSelection(currentAnalysis);
+  if (previewActive && (baselineAnalysis ?? currentAnalysis)) {
+    void restoreSelection(baselineAnalysis ?? currentAnalysis!);
   }
 });
 
@@ -185,23 +152,34 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
         postMessage({ type: "preview-applied", count: updated });
         return;
       }
-      case "preview-theme": {
-        if (!currentAnalysis) {
-          await refreshSelection();
-        }
-        if (!currentAnalysis) return;
-
-        const updated = await applyThemeHierarchy(currentAnalysis, message.settings);
-        previewActive = true;
-        postMessage({ type: "preview-applied", count: updated });
-        return;
-      }
       case "clear-preview": {
-        if (currentAnalysis && previewActive) {
-          await restoreSelection(currentAnalysis);
+        if (previewActive && (baselineAnalysis ?? currentAnalysis)) {
+          await restoreSelection(baselineAnalysis ?? currentAnalysis!);
         }
         previewActive = false;
         postMessage({ type: "preview-cleared" });
+        return;
+      }
+      case "restore-baseline": {
+        if (baselineAnalysis) {
+          await restoreSelection(baselineAnalysis);
+          previewActive = false;
+          currentAnalysis = extractSelectionAnalysis();
+          if (currentAnalysis) {
+            postMessage({ type: "selection-analysis", payload: currentAnalysis.summary });
+          } else {
+            baselineAnalysis = null;
+            postMessage({
+              type: "selection-empty",
+              message:
+                "Select a frame or layers with fills, strokes, or text colors to analyze them in HCT.",
+            });
+          }
+        } else if (currentAnalysis && previewActive) {
+          await restoreSelection(currentAnalysis);
+          previewActive = false;
+          postMessage({ type: "preview-cleared" });
+        }
         return;
       }
       case "apply-colors": {
@@ -214,39 +192,6 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
         previewActive = false;
         figma.notify("Colors applied to the current selection.");
         await refreshSelection();
-        return;
-      }
-      case "apply-theme": {
-        if (!currentAnalysis) {
-          await refreshSelection();
-        }
-        if (!currentAnalysis) return;
-
-        await applyThemeHierarchy(currentAnalysis, message.settings);
-        previewActive = false;
-        figma.notify("Theme applied to the current selection.");
-        await refreshSelection();
-        return;
-      }
-      case "export-variables": {
-        const created = exportVariables(message.tokens, message.collectionName);
-        figma.notify(`Created ${created} variables.`);
-        postMessage({
-          type: "export-complete",
-          kind: "variables",
-          created,
-          collectionName: message.collectionName,
-        });
-        return;
-      }
-      case "export-styles": {
-        const created = exportStyles(message.tokens, message.styleGroupName);
-        figma.notify(`Created ${created} local color styles.`);
-        postMessage({
-          type: "export-complete",
-          kind: "styles",
-          created,
-        });
         return;
       }
       default: {

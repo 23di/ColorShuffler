@@ -10,7 +10,6 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@material/material-color-utilities": "^0.4.0",
     "apca-w3": "^0.1.9",
     "culori": "^4.0.2",
     "react": "^19.1.1",
