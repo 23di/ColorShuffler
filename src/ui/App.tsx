@@ -1130,8 +1130,11 @@ function App() {
                             </span>
                           </button>
                         </div>
-                        {!collapsedGroups[group.id] ? (
-                          <>
+                        <div
+                          className={`collapsible-grid${collapsedGroups[group.id] ? " is-collapsed" : ""}`}
+                          aria-hidden={collapsedGroups[group.id]}
+                        >
+                          <div className="collapsible-grid-inner">
                             <RangeField
                               label={
                                 <SelectField
@@ -1225,8 +1228,8 @@ function App() {
                                 })
                               }
                             />
-                          </>
-                        ) : null}
+                          </div>
+                        </div>
                       </div>
                     );
                   })}
@@ -1304,92 +1307,97 @@ function App() {
                   </span>
                 </button>
               </div>
-              {!themeSettingsCollapsed && <div className="theme-settings-stack">
-                <RangeField
-                  label="Surface depth"
-                  min={-50}
-                  max={200}
-                  step={1}
-                  value={themeSettings.surfaceDepth}
-                  display={`${themeSettings.surfaceDepth}%`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceDepth}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, surfaceDepth: value }))
-                  }
-                />
-                <RangeField
-                  label="Surface contrast"
-                  min={-200}
-                  max={200}
-                  step={1}
-                  value={themeSettings.surfaceContrast}
-                  display={fmt(themeSettings.surfaceContrast)}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceContrast}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, surfaceContrast: value }))
-                  }
-                />
-                <RangeField
-                  label="Color depth"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={themeSettings.chromaticDepth}
-                  display={`${themeSettings.chromaticDepth}%`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaticDepth}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, chromaticDepth: value }))
-                  }
-                />
-                <RangeField
-                  label="Chroma preserve"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={themeSettings.chromaPreservation}
-                  display={`${themeSettings.chromaPreservation}%`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaPreservation}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, chromaPreservation: value }))
-                  }
-                />
-                <RangeField
-                  label="Text depth"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={themeSettings.textDepth}
-                  display={`${themeSettings.textDepth}%`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textDepth}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, textDepth: value }))
-                  }
-                />
-                <RangeField
-                  label="Text contrast"
-                  min={0}
-                  max={90}
-                  step={1}
-                  value={themeSettings.textMinContrast}
-                  display={`${themeSettings.textMinContrast}`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textMinContrast}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, textMinContrast: value }))
-                  }
-                />
-                <div className="theme-settings-options">
-                  <ToggleCheck
-                    label="Preserve color foreground"
-                    checked={themeSettings.preserveColorForeground}
+              <div
+                className={`collapsible-grid${themeSettingsCollapsed ? " is-collapsed" : ""}`}
+                aria-hidden={themeSettingsCollapsed}
+              >
+                <div className="collapsible-grid-inner theme-settings-stack">
+                  <RangeField
+                    label="Surface depth"
+                    min={-50}
+                    max={200}
+                    step={1}
+                    value={themeSettings.surfaceDepth}
+                    display={`${themeSettings.surfaceDepth}%`}
+                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceDepth}
                     onChange={(value) =>
-                      setThemeSettings((current) => ({
-                        ...current,
-                        preserveColorForeground: value,
-                      }))
+                      setThemeSettings((current) => ({ ...current, surfaceDepth: value }))
                     }
                   />
+                  <RangeField
+                    label="Surface contrast"
+                    min={-200}
+                    max={200}
+                    step={1}
+                    value={themeSettings.surfaceContrast}
+                    display={fmt(themeSettings.surfaceContrast)}
+                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceContrast}
+                    onChange={(value) =>
+                      setThemeSettings((current) => ({ ...current, surfaceContrast: value }))
+                    }
+                  />
+                  <RangeField
+                    label="Color depth"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={themeSettings.chromaticDepth}
+                    display={`${themeSettings.chromaticDepth}%`}
+                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaticDepth}
+                    onChange={(value) =>
+                      setThemeSettings((current) => ({ ...current, chromaticDepth: value }))
+                    }
+                  />
+                  <RangeField
+                    label="Chroma preserve"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={themeSettings.chromaPreservation}
+                    display={`${themeSettings.chromaPreservation}%`}
+                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaPreservation}
+                    onChange={(value) =>
+                      setThemeSettings((current) => ({ ...current, chromaPreservation: value }))
+                    }
+                  />
+                  <RangeField
+                    label="Text depth"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={themeSettings.textDepth}
+                    display={`${themeSettings.textDepth}%`}
+                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.textDepth}
+                    onChange={(value) =>
+                      setThemeSettings((current) => ({ ...current, textDepth: value }))
+                    }
+                  />
+                  <RangeField
+                    label="Text contrast"
+                    min={0}
+                    max={90}
+                    step={1}
+                    value={themeSettings.textMinContrast}
+                    display={`${themeSettings.textMinContrast}`}
+                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.textMinContrast}
+                    onChange={(value) =>
+                      setThemeSettings((current) => ({ ...current, textMinContrast: value }))
+                    }
+                  />
+                  <div className="theme-settings-options">
+                    <ToggleCheck
+                      label="Preserve color foreground"
+                      checked={themeSettings.preserveColorForeground}
+                      onChange={(value) =>
+                        setThemeSettings((current) => ({
+                          ...current,
+                          preserveColorForeground: value,
+                        }))
+                      }
+                    />
+                  </div>
                 </div>
-              </div>}
+              </div>
             </div>
           </Section>}
 

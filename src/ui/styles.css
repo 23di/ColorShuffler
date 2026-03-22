@@ -23,6 +23,8 @@
   --shadow-1: 0 1px 4px rgba(0, 0, 0, 0.5);
   --radius: 4px;
   --font: "Inter", system-ui, sans-serif;
+  --transition-fast: 0.14s ease;
+  --transition-base: 0.18s ease;
 }
 html,
 body,
@@ -123,7 +125,7 @@ body,
   font-size: 10px;
 }
 .section {
-  padding: 12px 12px 2px;
+  padding: 12px 12px 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -237,7 +239,7 @@ body,
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px 12px 8px;
+  padding: 8px 12px;
   border: 0;
   border-radius: 10px;
   background: var(--bg-2);
@@ -546,7 +548,7 @@ body,
   border: 0;
   appearance: none;
   -webkit-appearance: none;
-  background: color-mix(in srgb, var(--text-2) 60%, var(--bg-1));
+  background: color-mix(in srgb, var(--text-2) 30%, var(--bg-3));
   border-radius: 2px;
   position: relative;
 }
@@ -556,14 +558,14 @@ body,
 .toggle-check input[type="checkbox"]:checked:after {
   content: "";
   position: absolute;
-  left: 3px;
-  top: 1px;
+  left: 50%;
+  top: 50%;
   width: 3px;
   height: 6px;
   border: 1.5px solid white;
   border-top: 0;
   border-left: 0;
-  transform: rotate(40deg);
+  transform: translate(-50%, -60%) rotate(45deg);
 }
 .toggle-check.is-switch {
   gap: 7px;
@@ -766,11 +768,54 @@ button:disabled {
   flex-direction: column;
   gap: 10px;
 }
+.collapsible-grid {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-top: 0;
+  opacity: 1;
+  transition:
+    grid-template-rows 0.2s ease,
+    margin-top 0.2s ease,
+    opacity 0.16s ease;
+}
+.collapsible-grid.is-collapsed {
+  grid-template-rows: 0fr;
+  margin-top: -10px;
+  opacity: 0;
+  pointer-events: none;
+}
+.collapsible-grid-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .theme-settings-options {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   padding-top: 2px;
+}
+.shell::-webkit-scrollbar-thumb,
+.tab,
+.hue-group-card:not(.main-controls-card),
+.theme-settings-card,
+.hue-group-header,
+.group-chevron-btn,
+.hue-add-btn,
+.select-field select,
+.btn-ghost,
+.toggle-check input[type="checkbox"],
+.add-btn {
+  transition:
+    background var(--transition-base),
+    color var(--transition-base),
+    border-color var(--transition-base),
+    opacity var(--transition-base),
+    outline-color var(--transition-base),
+    box-shadow var(--transition-base),
+    transform var(--transition-fast);
 }
 .matrix-cell.filled:hover .cell-swatch,
 .matrix-cell.selected .cell-swatch {
