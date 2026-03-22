@@ -13,13 +13,20 @@ import {
   DEFAULT_EXPLORE_SETTINGS,
 } from "../shared/explore";
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
+import {
+  applyThemeFlip,
+  DEFAULT_THEME_FLIP_SETTINGS,
+  type ThemeTarget,
+} from "../shared/theme-flip";
 import type {
   ColorMappingEntry,
   ExploreSettings,
   SelectionAnalysisSummary,
+  ThemeFlipSettings,
 } from "../shared/types";
 import {
   buildColorRoleIndex,
+  clamp,
   deriveNeutralThreshold,
   familyFromHue,
   hueDistance,
@@ -482,8 +489,14 @@ function App() {
   });
   const [uiWidth, setUiWidth] = useState(DEFAULT_UI_WIDTH);
   const [pluginFocused, setPluginFocused] = useState(true);
+  const [themeFlipEnabled, setThemeFlipEnabled] = useState(false);
+  const [themeSettingsCollapsed, setThemeSettingsCollapsed] = useState(false);
+  const [themeSettings, setThemeSettings] = useState<ThemeFlipSettings>(
+    DEFAULT_THEME_FLIP_SETTINGS,
+  );
 
   const shellRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const lastMappingRef = useRef<ColorMappingEntry[]>([]);
   const pluginFocusedRef = useRef(true);
 
@@ -502,6 +515,7 @@ function App() {
             setAnalysis(null);
             setPrimaryTintEnabled(false);
             setExtraHueGroups([]);
+            setThemeFlipEnabled(false);
             setStatus(msg.message);
             break;
           case "plugin-error":
@@ -551,8 +565,9 @@ function App() {
 
     const syncSize = () => {
       frameId = 0;
+      const inner = innerRef.current;
       const nextWidth = uiWidth;
-      const nextHeight = Math.ceil(shell.scrollHeight);
+      const nextHeight = Math.ceil(inner ? inner.offsetHeight : shell.scrollHeight);
       if (Math.abs(nextWidth - lastWidth) < 2 && Math.abs(nextHeight - lastHeight) < 2) {
         return;
       }
@@ -571,6 +586,7 @@ function App() {
     });
 
     observer.observe(shell);
+    if (innerRef.current) observer.observe(innerRef.current);
     scheduleSync();
 
     return () => {
@@ -606,6 +622,8 @@ function App() {
     () => new Map((deferredAnalysis?.colors ?? []).map((color) => [color.key, color])),
     [deferredAnalysis],
   );
+  const sourceTheme = deferredAnalysis?.themeDetection?.inferredSourceTheme ?? "light";
+  const targetTheme: ThemeTarget = sourceTheme === "dark" ? "light" : "dark";
   const exploreRoleByKey = useMemo(
     () =>
       deferredAnalysis
@@ -758,6 +776,14 @@ function App() {
     settings.hueShift,
   ]);
 
+  const themedDemoEntries = useMemo(
+    () =>
+      themeFlipEnabled
+        ? applyThemeFlip(demoEntries, analysisColorByKey, themeSettings, targetTheme)
+        : demoEntries,
+    [analysisColorByKey, demoEntries, targetTheme, themeFlipEnabled, themeSettings],
+  );
+
   useEffect(() => {
     setExtraHueGroups((current) =>
       current.filter((group) => frameGroupById.has(group.scopeId)),
@@ -780,21 +806,23 @@ function App() {
   }, [neutralGroup, settings.hueShift]);
 
   useEffect(() => {
-    lastMappingRef.current = demoEntries;
-    if (!pluginFocused || !deferredAnalysis || demoEntries.length === 0) return;
+    lastMappingRef.current = themedDemoEntries;
+    if (!pluginFocused || !deferredAnalysis || themedDemoEntries.length === 0) return;
 
     const timeoutId = window.setTimeout(() => {
-      postMsg({ type: "preview-colors", mapping: demoEntries });
+      postMsg({ type: "preview-colors", mapping: themedDemoEntries });
     }, 60);
 
     return () => window.clearTimeout(timeoutId);
-  }, [deferredAnalysis, demoEntries, pluginFocused]);
+  }, [deferredAnalysis, pluginFocused, themedDemoEntries]);
 
   const handleReset = () => {
     setPrimaryHueScope("all");
     setPrimaryTintEnabled(false);
     setExtraHueGroups([]);
     setSettings(DEFAULT_EXPLORE_SETTINGS);
+    setThemeSettings(DEFAULT_THEME_FLIP_SETTINGS);
+    setThemeFlipEnabled(false);
     postMsg({ type: "restore-baseline" });
   };
 
@@ -945,12 +973,11 @@ function App() {
 
   return (
     <div className="shell" ref={shellRef}>
+    <div ref={innerRef} className="shell-inner">
       {!analysis ? (
         <div className="empty">
-          <p>Select a frame or layers with fills, strokes, or text colors to analyze them.</p>
-          <button className="btn-secondary" onClick={() => postMsg({ type: "scan-selection" })}>
-            Rescan
-          </button>
+          <IconEmptyState />
+          <p className="empty-text">Select a frame or layers with fills, strokes, or text colors to analyze them.</p>
         </div>
       ) : (
         <div className="content">
@@ -1054,10 +1081,18 @@ function App() {
                     return (
                       <div
                         key={group.id}
-                        className={`hue-group-card${hasAccentSurface ? "" : " is-neutral-card"}`}
+                        className={`hue-group-card${hasAccentSurface ? "" : " is-neutral-card"}${!collapsedGroups[group.id] ? " is-open" : ""}`}
                         style={groupStyle}
+                        onClick={collapsedGroups[group.id] ? (e) => {
+                          if (!(e.target as HTMLElement).closest("button")) toggleGroupCollapsed(group.id);
+                        } : undefined}
                       >
-                        <div className="hue-group-header">
+                        <div
+                          className="hue-group-header"
+                          onClick={!collapsedGroups[group.id] ? (e) => {
+                            if (!(e.target as HTMLElement).closest("button")) toggleGroupCollapsed(group.id);
+                          } : undefined}
+                        >
                           <button
                             className="group-toggle"
                             type="button"
@@ -1084,7 +1119,7 @@ function App() {
                             ) : null}
                           </div>
                           <button
-                            className="group-chevron-btn icon-btn icon-btn-plain"
+                            className="group-chevron-btn icon-btn"
                             type="button"
                             onClick={() => toggleGroupCollapsed(group.id)}
                             aria-label={collapsedGroups[group.id] ? `Expand ${scope.name}` : `Collapse ${scope.name}`}
@@ -1209,7 +1244,7 @@ function App() {
                       return (
                         <button
                           key={`add-${group.id}`}
-                          className={`btn-secondary hue-add-btn${isAdded ? " is-added" : ""}`}
+                          className={`hue-add-btn${isAdded ? " is-added" : ""}`}
                           disabled={isAdded}
                           onClick={() => handleAddExtraHueGroup(group.id)}
                         >
@@ -1234,8 +1269,140 @@ function App() {
             </div>
           </Section>
 
+          {themeFlipEnabled && <Section>
+            <div
+              className={`hue-group-card theme-settings-card${!themeSettingsCollapsed ? " is-open" : ""}`}
+              onClick={themeSettingsCollapsed ? (e) => {
+                if (!(e.target as HTMLElement).closest("button")) setThemeSettingsCollapsed(false);
+              } : undefined}
+            >
+              <div
+                className="hue-group-header"
+                onClick={!themeSettingsCollapsed ? (e) => {
+                  if (!(e.target as HTMLElement).closest("button")) setThemeSettingsCollapsed((v) => !v);
+                } : undefined}
+              >
+                <button
+                  className="group-toggle"
+                  type="button"
+                  onClick={() => setThemeSettingsCollapsed((v) => !v)}
+                  aria-expanded={!themeSettingsCollapsed}
+                >
+                  <div className="hue-group-copy">
+                    <strong>Invert colors</strong>
+                  </div>
+                </button>
+                <button
+                  className="group-chevron-btn icon-btn"
+                  type="button"
+                  onClick={() => setThemeSettingsCollapsed((v) => !v)}
+                  aria-label={themeSettingsCollapsed ? "Expand invert colors" : "Collapse invert colors"}
+                  aria-expanded={!themeSettingsCollapsed}
+                >
+                  <span className={`group-chevron${themeSettingsCollapsed ? " is-collapsed" : ""}`}>
+                    <IconChevronDown />
+                  </span>
+                </button>
+              </div>
+              {!themeSettingsCollapsed && <div className="theme-settings-stack">
+                <RangeField
+                  label="Surface depth"
+                  min={-50}
+                  max={200}
+                  step={1}
+                  value={themeSettings.surfaceDepth}
+                  display={`${themeSettings.surfaceDepth}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceDepth}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, surfaceDepth: value }))
+                  }
+                />
+                <RangeField
+                  label="Surface contrast"
+                  min={-200}
+                  max={200}
+                  step={1}
+                  value={themeSettings.surfaceContrast}
+                  display={fmt(themeSettings.surfaceContrast)}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceContrast}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, surfaceContrast: value }))
+                  }
+                />
+                <RangeField
+                  label="Color depth"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.chromaticDepth}
+                  display={`${themeSettings.chromaticDepth}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaticDepth}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, chromaticDepth: value }))
+                  }
+                />
+                <RangeField
+                  label="Chroma preserve"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.chromaPreservation}
+                  display={`${themeSettings.chromaPreservation}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaPreservation}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, chromaPreservation: value }))
+                  }
+                />
+                <RangeField
+                  label="Text depth"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.textDepth}
+                  display={`${themeSettings.textDepth}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textDepth}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, textDepth: value }))
+                  }
+                />
+                <RangeField
+                  label="Text contrast"
+                  min={0}
+                  max={90}
+                  step={1}
+                  value={themeSettings.textMinContrast}
+                  display={`${themeSettings.textMinContrast}`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textMinContrast}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, textMinContrast: value }))
+                  }
+                />
+                <div className="theme-settings-options">
+                  <ToggleCheck
+                    label="Preserve color foreground"
+                    checked={themeSettings.preserveColorForeground}
+                    onChange={(value) =>
+                      setThemeSettings((current) => ({
+                        ...current,
+                        preserveColorForeground: value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>}
+            </div>
+          </Section>}
+
           <div className="footer">
             <span className="footer-status">{status}</span>
+            <button
+              className={`btn-ghost icon-btn${themeFlipEnabled ? " is-active" : ""}`}
+              onClick={() => setThemeFlipEnabled((current) => !current)}
+              title={themeFlipEnabled ? `Back to ${sourceTheme} theme` : `Switch to ${targetTheme} theme`}
+              aria-label={themeFlipEnabled ? `Back to ${sourceTheme} theme` : `Switch to ${targetTheme} theme`}
+            >
+              <IconThemeFlip />
+            </button>
             <button
               className="btn-ghost icon-btn"
               onMouseDown={handleCompareStart}
@@ -1252,13 +1419,13 @@ function App() {
               title="Reset"
               aria-label="Reset"
             >
-              ↺
+              <IconReset />
             </button>
           </div>
         </div>
       )}
 
-      <div className="window-resizer" onMouseDown={handleResizeDragStart} title="Resize window" />
+    </div>
     </div>
   );
 }
@@ -1407,10 +1574,18 @@ function SelectField({
   );
 }
 
+function IconReset() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
+    </svg>
+  );
+}
+
 function IconCompareArrows() {
   return (
     <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M7.83 8H20v2H7.83l3.58 3.59L10 15l-6-6 6-6 1.41 1.41L7.83 8zm8.34 6H4v2h12.17l-3.58 3.59L14 21l6-6-6-6-1.41 1.41L16.17 14z" />
+      <path d="M10 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h5v2h2V1h-2v2zm0 15H5l5-6v6zm9-15h-5v2h5v13l-5-6v9h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
     </svg>
   );
 }
@@ -1418,7 +1593,7 @@ function IconCompareArrows() {
 function IconMinus() {
   return (
     <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5 11h14v2H5z" />
+      <path d="M19 13H5v-2h14v2z" />
     </svg>
   );
 }
@@ -1426,7 +1601,7 @@ function IconMinus() {
 function IconPlus() {
   return (
     <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
+      <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
     </svg>
   );
 }
@@ -1434,7 +1609,23 @@ function IconPlus() {
 function IconChevronDown() {
   return (
     <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+      <path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6-1.41-1.41z" />
+    </svg>
+  );
+}
+
+function IconEmptyState() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z" />
+    </svg>
+  );
+}
+
+function IconThemeFlip() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z" />
     </svg>
   );
 }

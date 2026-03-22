@@ -41,7 +41,7 @@ export interface SerializedColor {
   a: number;
 }
 
-// Compatibility shape: l/c/h now carry HCT tone/chroma/hue values.
+// Compatibility shape: l/c/h now carry OKLCH lightness/chroma/hue values.
 export interface HctColor {
   l: number;
   c: number;
@@ -91,16 +91,14 @@ export interface ThemeDetectionSummary {
   inferredSourceTheme: "light" | "dark";
 }
 
-export interface ThemeSwitcherSettings {
-  direction: ThemeDirection;
-  schemeVariant: MaterialSchemeVariant;
-  contrastLevel: number;
-  saturationThreshold: number;
-  killColorCast: boolean;
-  primaryTargetLc: number;
-  secondaryTargetLc: number;
-  invertShadows: boolean;
-  swapFillsAndStrokes: boolean;
+export interface ThemeFlipSettings {
+  surfaceDepth: number;
+  surfaceContrast: number;
+  chromaticDepth: number;
+  chromaPreservation: number;
+  textDepth: number;
+  textMinContrast: number;
+  preserveColorForeground: boolean;
 }
 
 export interface ExploreBandAdjustment {

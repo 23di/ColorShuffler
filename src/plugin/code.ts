@@ -6,6 +6,7 @@ import {
   applyColorMapping,
   extractSelectionAnalysis,
   restoreSelection,
+  restoreSelectionSync,
   type SelectionAnalysisInternal,
 } from "./selection";
 
@@ -106,8 +107,12 @@ figma.on("selectionchange", () => {
 });
 
 figma.on("close", () => {
-  if (previewActive && (baselineAnalysis ?? currentAnalysis)) {
-    void restoreSelection(baselineAnalysis ?? currentAnalysis!);
+  try {
+    if (previewActive && (baselineAnalysis ?? currentAnalysis)) {
+      restoreSelectionSync(baselineAnalysis ?? currentAnalysis!);
+    }
+  } catch {
+    // ignore errors during plugin teardown
   }
 });
 

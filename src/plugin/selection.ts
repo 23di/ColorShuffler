@@ -79,6 +79,10 @@ interface NodeOriginalState {
 
 interface MutableNodeState extends NodeOriginalState {
   textSegmentIndex?: Map<string, TextSegmentState>;
+  dirtyFills?: boolean;
+  dirtyStrokes?: boolean;
+  dirtyEffects?: boolean;
+  dirtyTextSegments?: boolean;
 }
 
 interface ColorAggregate {
@@ -95,6 +99,8 @@ interface TextContextAggregate {
   backgroundCounts: Map<string, { rgb: SerializedColor; count: number }>;
 }
 
+type ForegroundContextAggregate = TextContextAggregate;
+
 export interface SelectionAnalysisInternal {
   summary: SelectionAnalysisSummary;
   bindings: NodeBinding[];
@@ -104,6 +110,71 @@ export interface SelectionAnalysisInternal {
 
 function clonePaints(paints: ReadonlyArray<Paint>): Paint[] {
   return JSON.parse(JSON.stringify(paints)) as Paint[];
+}
+
+function sanitizeColorStop(stop: ColorStop): ColorStop {
+  const { boundVariables: _boundVariables, ...rest } = stop as ColorStop & {
+    boundVariables?: ColorStop["boundVariables"];
+  };
+  return rest;
+}
+
+function sanitizePaint(paint: Paint): Paint {
+  switch (paint.type) {
+    case "SOLID": {
+      const { boundVariables: _boundVariables, ...rest } = paint as SolidPaint & {
+        boundVariables?: SolidPaint["boundVariables"];
+      };
+      return rest;
+    }
+    case "GRADIENT_LINEAR":
+    case "GRADIENT_RADIAL":
+    case "GRADIENT_ANGULAR":
+    case "GRADIENT_DIAMOND":
+      return {
+        ...paint,
+        gradientStops: paint.gradientStops.map(sanitizeColorStop),
+      };
+    case "IMAGE": {
+      const base: ImagePaint = {
+        type: "IMAGE",
+        scaleMode: paint.scaleMode,
+        imageHash: paint.imageHash,
+        visible: paint.visible,
+        opacity: paint.opacity,
+        blendMode: paint.blendMode,
+        filters: paint.filters,
+      };
+      if (paint.scaleMode === "CROP" && paint.imageTransform) {
+        return {
+          ...base,
+          imageTransform: paint.imageTransform,
+        };
+      }
+      if (paint.scaleMode === "TILE" && paint.scalingFactor !== undefined) {
+        return {
+          ...base,
+          scalingFactor: paint.scalingFactor,
+          rotation: paint.rotation,
+        };
+      }
+      if (paint.scaleMode === "FILL" || paint.scaleMode === "FIT") {
+        return {
+          ...base,
+          rotation: paint.rotation,
+        };
+      }
+      return base;
+    }
+    case "VIDEO":
+      return paint;
+    default:
+      return paint;
+  }
+}
+
+function sanitizePaints(paints: ReadonlyArray<Paint>): Paint[] {
+  return paints.map(sanitizePaint);
 }
 
 function cloneEffects(effects: ReadonlyArray<Effect>): Effect[] {
@@ -165,13 +236,17 @@ function sourceKindFor(
   return gradient ? "gradient-fill" : "fill";
 }
 
+function aggregateContextFor(sourceKind: SourceKind): "text" | "paint" {
+  return sourceKind === "text" || sourceKind === "gradient-text" ? "text" : "paint";
+}
+
 function recordColor(
   aggregates: Map<string, ColorAggregate>,
   nodeId: string,
   sourceKind: SourceKind,
   rgb: SerializedColor,
 ): string {
-  const key = buildColorKey(rgb);
+  const key = `${buildColorKey(rgb)}__${aggregateContextFor(sourceKind)}`;
   const existing = aggregates.get(key);
   if (!existing) {
     aggregates.set(key, {
@@ -208,22 +283,144 @@ function pickVisiblePaintColor(paints: ReadonlyArray<Paint>): SerializedColor | 
   return null;
 }
 
-function findNearestParentBackground(node: SceneNode): SerializedColor | null {
-  let current = node.parent;
-  while (current && current.type !== "PAGE") {
-    if ("visible" in current && current.visible === false) {
-      current = current.parent;
-      continue;
+function getAbsoluteBounds(node: SceneNode): Rect | null {
+  return "absoluteBoundingBox" in node ? node.absoluteBoundingBox : null;
+}
+
+function boundsOverlap(a: Rect | null, b: Rect | null): boolean {
+  if (!a || !b) return false;
+  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return width > 0 && height > 0;
+}
+
+function findBackgroundInSubtree(
+  node: SceneNode,
+  targetBounds: Rect | null,
+): SerializedColor | null {
+  if ("visible" in node && node.visible === false) {
+    return null;
+  }
+
+  if ("fills" in node && Array.isArray(node.fills) && boundsOverlap(getAbsoluteBounds(node), targetBounds)) {
+    const background = pickVisiblePaintColor(node.fills);
+    if (background) {
+      return background;
     }
-    if ("fills" in current && Array.isArray(current.fills)) {
-      const background = pickVisiblePaintColor(current.fills);
+  }
+
+  if ("children" in node) {
+    for (let index = node.children.length - 1; index >= 0; index -= 1) {
+      const child = node.children[index];
+      if (child.type === "SLICE") continue;
+      const background = findBackgroundInSubtree(child, targetBounds);
       if (background) {
         return background;
       }
     }
-    current = current.parent;
   }
+
   return null;
+}
+
+function findNearestBackground(node: SceneNode): SerializedColor | null {
+  const targetBounds = getAbsoluteBounds(node);
+  let current: SceneNode = node;
+
+  while (current.parent && current.parent.type !== "PAGE" && current.parent.type !== "DOCUMENT") {
+    const parent = current.parent;
+
+    if ("visible" in parent && parent.visible === false) {
+      current = parent;
+      continue;
+    }
+
+    if ("fills" in parent && Array.isArray(parent.fills)) {
+      const background = pickVisiblePaintColor(parent.fills);
+      if (background) {
+        return background;
+      }
+    }
+
+    if ("children" in parent) {
+      const currentIndex = parent.children.findIndex((child) => child.id === current.id);
+      for (let index = currentIndex - 1; index >= 0; index -= 1) {
+        const sibling = parent.children[index];
+        if (sibling.type === "SLICE") continue;
+        const background = findBackgroundInSubtree(sibling, targetBounds);
+        if (background) {
+          return background;
+        }
+      }
+      for (let index = currentIndex + 1; index < parent.children.length; index += 1) {
+        const sibling = parent.children[index];
+        if (sibling.type === "SLICE") continue;
+        const background = findBackgroundInSubtree(sibling, targetBounds);
+        if (background) {
+          return background;
+        }
+      }
+    }
+
+    current = parent as SceneNode;
+  }
+
+  return null;
+}
+
+function recordSurfaceContext(
+  contexts: Map<string, TextContextAggregate | ForegroundContextAggregate>,
+  sourceKey: string,
+  foregroundColor: SerializedColor,
+  backgroundColor: SerializedColor,
+): void {
+  const backgroundKey = buildColorKey(backgroundColor);
+  const contrast = calculateApcaContrast(foregroundColor, backgroundColor);
+  const existingContext = contexts.get(sourceKey);
+  if (existingContext) {
+    existingContext.usageCount += 1;
+    existingContext.contrastTotal += contrast;
+    const existingBackground = existingContext.backgroundCounts.get(backgroundKey);
+    if (existingBackground) {
+      existingBackground.count += 1;
+    } else {
+      existingContext.backgroundCounts.set(backgroundKey, {
+        rgb: backgroundColor,
+        count: 1,
+      });
+    }
+    return;
+  }
+
+  contexts.set(sourceKey, {
+    sourceKey,
+    usageCount: 1,
+    contrastTotal: contrast,
+    backgroundCounts: new Map([
+      [
+        backgroundKey,
+        {
+          rgb: backgroundColor,
+          count: 1,
+        },
+      ],
+    ]),
+  });
+}
+
+function isForegroundIconCandidate(node: SceneNode, property: PaintProperty): boolean {
+  if (property === "strokes") return true;
+  switch (node.type) {
+    case "VECTOR":
+    case "BOOLEAN_OPERATION":
+    case "STAR":
+    case "ELLIPSE":
+    case "POLYGON":
+    case "LINE":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function nodeArea(node: SceneNode): number {
@@ -305,9 +502,14 @@ function inspectPaintArray(
   aggregates: Map<string, ColorAggregate>,
   bindings: NodeBinding[],
   textContexts?: Map<string, TextContextAggregate>,
+  foregroundContexts?: Map<string, ForegroundContextAggregate>,
 ): void {
   const textBackground =
-    node.type === "TEXT" && property === "fills" ? findNearestParentBackground(node) : null;
+    node.type === "TEXT" && property === "fills" ? findNearestBackground(node) : null;
+  const localBackground =
+    node.type !== "TEXT" && isForegroundIconCandidate(node, property)
+      ? findNearestBackground(node)
+      : null;
   paints.forEach((paint, paintIndex) => {
     if (!paintVisible(paint)) return;
 
@@ -321,36 +523,12 @@ function inspectPaintArray(
       );
       if (textContexts && node.type === "TEXT" && property === "fills") {
         const backgroundColor = textBackground ?? { r: 1, g: 1, b: 1, a: 1 };
-        const backgroundKey = buildColorKey(backgroundColor);
-        const contrast = calculateApcaContrast(rgb, backgroundColor);
-        const existingContext = textContexts.get(sourceKey);
-        if (existingContext) {
-          existingContext.usageCount += 1;
-          existingContext.contrastTotal += contrast;
-          const existingBackground = existingContext.backgroundCounts.get(backgroundKey);
-          if (existingBackground) {
-            existingBackground.count += 1;
-          } else {
-            existingContext.backgroundCounts.set(backgroundKey, {
-              rgb: backgroundColor,
-              count: 1,
-            });
-          }
-        } else {
-          textContexts.set(sourceKey, {
-            sourceKey,
-            usageCount: 1,
-            contrastTotal: contrast,
-            backgroundCounts: new Map([
-              [
-                backgroundKey,
-                {
-                  rgb: backgroundColor,
-                  count: 1,
-                },
-              ],
-            ]),
-          });
+        recordSurfaceContext(textContexts, sourceKey, rgb, backgroundColor);
+      }
+      if (foregroundContexts && localBackground) {
+        const contrast = Math.abs(calculateApcaContrast(rgb, localBackground));
+        if (contrast >= 45) {
+          recordSurfaceContext(foregroundContexts, sourceKey, rgb, localBackground);
         }
       }
       bindings.push({
@@ -373,36 +551,12 @@ function inspectPaintArray(
       );
       if (textContexts && node.type === "TEXT" && property === "fills") {
         const backgroundColor = textBackground ?? { r: 1, g: 1, b: 1, a: 1 };
-        const backgroundKey = buildColorKey(backgroundColor);
-        const contrast = calculateApcaContrast(average, backgroundColor);
-        const existingContext = textContexts.get(sourceKey);
-        if (existingContext) {
-          existingContext.usageCount += 1;
-          existingContext.contrastTotal += contrast;
-          const existingBackground = existingContext.backgroundCounts.get(backgroundKey);
-          if (existingBackground) {
-            existingBackground.count += 1;
-          } else {
-            existingContext.backgroundCounts.set(backgroundKey, {
-              rgb: backgroundColor,
-              count: 1,
-            });
-          }
-        } else {
-          textContexts.set(sourceKey, {
-            sourceKey,
-            usageCount: 1,
-            contrastTotal: contrast,
-            backgroundCounts: new Map([
-              [
-                backgroundKey,
-                {
-                  rgb: backgroundColor,
-                  count: 1,
-                },
-              ],
-            ]),
-          });
+        recordSurfaceContext(textContexts, sourceKey, average, backgroundColor);
+      }
+      if (foregroundContexts && localBackground) {
+        const contrast = Math.abs(calculateApcaContrast(average, localBackground));
+        if (contrast >= 45) {
+          recordSurfaceContext(foregroundContexts, sourceKey, average, localBackground);
         }
       }
       bindings.push({
@@ -423,7 +577,7 @@ function inspectTextSegments(
   bindings: NodeBinding[],
   textContexts: Map<string, TextContextAggregate>,
 ): void {
-  const background = findNearestParentBackground(node);
+  const background = findNearestBackground(node);
   const segments = node.getStyledTextSegments(["fills"]);
   for (const segment of segments) {
     if (!Array.isArray(segment.fills)) continue;
@@ -440,37 +594,7 @@ function inspectTextSegments(
       const rgb = figmaColorToSerialized(paint.color, paint.opacity ?? 1);
       const sourceKey = recordColor(aggregates, node.id, "text", rgb);
       const backgroundColor = background ?? { r: 1, g: 1, b: 1, a: 1 };
-      const backgroundKey = buildColorKey(backgroundColor);
-      const contrast = calculateApcaContrast(rgb, backgroundColor);
-      const existingContext = textContexts.get(sourceKey);
-      if (existingContext) {
-        existingContext.usageCount += 1;
-        existingContext.contrastTotal += contrast;
-        const existingBackground = existingContext.backgroundCounts.get(backgroundKey);
-        if (existingBackground) {
-          existingBackground.count += 1;
-        } else {
-          existingContext.backgroundCounts.set(backgroundKey, {
-            rgb: backgroundColor,
-            count: 1,
-          });
-        }
-      } else {
-        textContexts.set(sourceKey, {
-          sourceKey,
-          usageCount: 1,
-          contrastTotal: contrast,
-          backgroundCounts: new Map([
-            [
-              backgroundKey,
-              {
-                rgb: backgroundColor,
-                count: 1,
-              },
-            ],
-          ]),
-        });
-      }
+      recordSurfaceContext(textContexts, sourceKey, rgb, backgroundColor);
       bindings.push({
         kind: "text-segment-solid",
         nodeId: node.id,
@@ -485,37 +609,7 @@ function inspectTextSegments(
       const average = averageGradientPaint(paint);
       const sourceKey = recordColor(aggregates, node.id, "gradient-text", average);
       const backgroundColor = background ?? { r: 1, g: 1, b: 1, a: 1 };
-      const backgroundKey = buildColorKey(backgroundColor);
-      const contrast = calculateApcaContrast(average, backgroundColor);
-      const existingContext = textContexts.get(sourceKey);
-      if (existingContext) {
-        existingContext.usageCount += 1;
-        existingContext.contrastTotal += contrast;
-        const existingBackground = existingContext.backgroundCounts.get(backgroundKey);
-        if (existingBackground) {
-          existingBackground.count += 1;
-        } else {
-          existingContext.backgroundCounts.set(backgroundKey, {
-            rgb: backgroundColor,
-            count: 1,
-          });
-        }
-      } else {
-        textContexts.set(sourceKey, {
-          sourceKey,
-          usageCount: 1,
-          contrastTotal: contrast,
-          backgroundCounts: new Map([
-            [
-              backgroundKey,
-              {
-                rgb: backgroundColor,
-                count: 1,
-              },
-            ],
-          ]),
-        });
-      }
+      recordSurfaceContext(textContexts, sourceKey, average, backgroundColor);
       bindings.push({
         kind: "text-segment-gradient",
         nodeId: node.id,
@@ -553,6 +647,7 @@ function buildSummary(
   nodeCount: number,
   layerCount: number,
   textContexts: Map<string, TextContextAggregate>,
+  foregroundContexts: Map<string, ForegroundContextAggregate>,
   themeDetection?: ThemeDetectionSummary,
 ): SelectionAnalysisSummary {
   const provisionalColors = [...aggregates.entries()].map(([key, aggregate]) => ({
@@ -573,30 +668,56 @@ function buildSummary(
       theme: (() => {
         const saturation = rgbToHsl(color.rgb).s;
         const textContext = textContexts.get(color.key);
-        const textOnly = color.sourceKinds.every(
-          (kind) => kind === "text" || kind === "gradient-text",
-        );
-        if (textContext && textOnly) {
-          let dominantBackground: { rgb: SerializedColor; count: number } | null = null;
-          for (const entry of textContext.backgroundCounts.values()) {
-            if (!dominantBackground || entry.count > dominantBackground.count) {
+        const foregroundContext = foregroundContexts.get(color.key);
+        const preferredContext = textContext ?? foregroundContext;
+        let dominantBackground: { rgb: SerializedColor; count: number } | null = null;
+        if (preferredContext) {
+          for (const entry of preferredContext.backgroundCounts.values()) {
+            const entryContrast = Math.abs(calculateApcaContrast(color.rgb, entry.rgb));
+            const dominantContrast = dominantBackground
+              ? Math.abs(calculateApcaContrast(color.rgb, dominantBackground.rgb))
+              : -1;
+            if (
+              !dominantBackground ||
+              entryContrast > dominantContrast + 0.5 ||
+              (Math.abs(entryContrast - dominantContrast) <= 0.5 && entry.count > dominantBackground.count)
+            ) {
               dominantBackground = entry;
             }
           }
-          const averageContrast = textContext.contrastTotal / Math.max(textContext.usageCount, 1);
+        }
+        const resolvedContrast = dominantBackground
+          ? calculateApcaContrast(color.rgb, dominantBackground.rgb)
+          : preferredContext
+            ? preferredContext.contrastTotal / Math.max(preferredContext.usageCount, 1)
+            : undefined;
+        const textMeta = preferredContext
+          ? {
+              originalLc: resolvedContrast,
+              textPriority: resolveTextPriority(resolvedContrast ?? 0),
+              textBackground: dominantBackground?.rgb,
+              textBackgroundHex: dominantBackground ? rgbToHex(dominantBackground.rgb) : undefined,
+            }
+          : {};
+        const textOnly = color.sourceKinds.every(
+          (kind) => kind === "text" || kind === "gradient-text",
+        );
+        const textShare = textContext
+          ? textContext.usageCount / Math.max(color.usageCount, 1)
+          : 0;
+        const textDominant = textOnly || textShare >= 0.35;
+        if (textContext && textDominant) {
           return {
             kind: "text",
             saturation,
-            originalLc: averageContrast,
-            textPriority: resolveTextPriority(averageContrast),
-            textBackground: dominantBackground?.rgb,
-            textBackgroundHex: dominantBackground ? rgbToHex(dominantBackground.rgb) : undefined,
+            ...textMeta,
           } satisfies ThemeColorContext;
         }
 
         return {
           kind: saturation > 0.18 ? "chromatic" : "neutral",
           saturation,
+          ...textMeta,
         } satisfies ThemeColorContext;
       })(),
     }))
@@ -621,6 +742,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
   const nodes = traverseNodes(roots);
   const aggregates = new Map<string, ColorAggregate>();
   const textContexts = new Map<string, TextContextAggregate>();
+  const foregroundContexts = new Map<string, ForegroundContextAggregate>();
   const bindings: NodeBinding[] = [];
   const originalStates = new Map<string, NodeOriginalState>();
   let fillAreaTotal = 0;
@@ -635,7 +757,15 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
         fillStyleId: "fillStyleId" in node ? node.fillStyleId : undefined,
         fonts: node.type === "TEXT" ? cloneFonts(uniqueFontsForText(node)) : undefined,
       });
-      inspectPaintArray(node, "fills", node.fills, aggregates, bindings, textContexts);
+      inspectPaintArray(
+        node,
+        "fills",
+        node.fills,
+        aggregates,
+        bindings,
+        textContexts,
+        foregroundContexts,
+      );
       if (node.type !== "TEXT") {
         const background = pickVisiblePaintColor(node.fills);
         const area = nodeArea(node);
@@ -662,7 +792,15 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
           originalStates.get(node.id)?.fonts ??
           (node.type === "TEXT" ? cloneFonts(uniqueFontsForText(node)) : undefined),
       });
-      inspectPaintArray(node, "strokes", node.strokes, aggregates, bindings, textContexts);
+      inspectPaintArray(
+        node,
+        "strokes",
+        node.strokes,
+        aggregates,
+        bindings,
+        textContexts,
+        foregroundContexts,
+      );
     }
 
     if ("effects" in node && Array.isArray(node.effects)) {
@@ -700,6 +838,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
       roots.length,
       nodes.length,
       textContexts,
+      foregroundContexts,
       themeDetection,
     ),
     bindings,
@@ -830,38 +969,117 @@ function isMissingNodeMutationError(error: unknown): boolean {
   return message.includes("does not exist") || message.includes("node not found");
 }
 
+export function restoreSelectionSync(analysis: SelectionAnalysisInternal): void {
+  for (const state of analysis.originalStates.values()) {
+    try {
+      const node = figma.getNodeById(state.nodeId);
+      if (!node || node.removed) continue;
+      if (state.fills && "fills" in node) {
+        node.fills = sanitizePaints(clonePaints(state.fills));
+        if ("fillStyleId" in node && state.fillStyleId !== undefined) {
+          try { (node as SceneNode & { fillStyleId: typeof state.fillStyleId }).fillStyleId = state.fillStyleId; } catch {}
+        }
+      }
+      if (state.strokes && "strokes" in node) {
+        node.strokes = sanitizePaints(clonePaints(state.strokes));
+        if ("strokeStyleId" in node && state.strokeStyleId !== undefined) {
+          try { (node as SceneNode & { strokeStyleId: string }).strokeStyleId = state.strokeStyleId as string; } catch {}
+        }
+      }
+      if (state.effects && "effects" in node) {
+        node.effects = cloneEffects(state.effects);
+      }
+      if (state.textSegments && node.type === "TEXT") {
+        for (const segment of state.textSegments) {
+          try {
+            node.setRangeFills(segment.start, segment.end, sanitizePaints(clonePaints(segment.fills)));
+          } catch {
+            // fonts may not be loaded — skip this segment
+          }
+        }
+      }
+    } catch {
+      // ignore errors during plugin teardown
+    }
+  }
+}
+
 export async function restoreSelection(
   analysis: SelectionAnalysisInternal,
 ): Promise<number> {
+  const fillNodeIds = new Set(
+    analysis.bindings
+      .filter(
+        (binding) =>
+          (binding.kind === "solid" || binding.kind === "gradient") &&
+          binding.property === "fills",
+      )
+      .map((binding) => binding.nodeId),
+  );
+  const strokeNodeIds = new Set(
+    analysis.bindings
+      .filter(
+        (binding) =>
+          (binding.kind === "solid" || binding.kind === "gradient") &&
+          binding.property === "strokes",
+      )
+      .map((binding) => binding.nodeId),
+  );
+  const effectNodeIds = new Set(
+    analysis.bindings
+      .filter((binding) => binding.kind === "effect")
+      .map((binding) => binding.nodeId),
+  );
+  const textSegmentNodeIds = new Set(
+    analysis.bindings
+      .filter(
+        (binding) =>
+          binding.kind === "text-segment-solid" || binding.kind === "text-segment-gradient",
+      )
+      .map((binding) => binding.nodeId),
+  );
   let restored = 0;
-  for (const state of analysis.originalStates.values()) {
-    const node = await figma.getNodeByIdAsync(state.nodeId);
+
+  const states = [...analysis.originalStates.values()];
+  const nodes = await Promise.all(states.map((s) => figma.getNodeByIdAsync(s.nodeId)));
+
+  await Promise.all(
+    states.map((s, i) => {
+      const node = nodes[i];
+      return node && !node.removed && node.type === "TEXT" ? ensureFontsLoaded(s.fonts) : undefined;
+    }),
+  );
+
+  for (let i = 0; i < states.length; i++) {
+    const state = states[i];
+    const node = nodes[i];
     if (!node || node.removed) continue;
     try {
-      if (node.type === "TEXT") {
-        await ensureFontsLoaded(state.fonts);
-      }
-      if (state.fills && "fills" in node) {
-        node.fills = clonePaints(state.fills);
+      if (state.fills && "fills" in node && fillNodeIds.has(state.nodeId)) {
+        node.fills = sanitizePaints(clonePaints(state.fills));
         if ("fillStyleId" in node && state.fillStyleId !== undefined) {
           try { (node as SceneNode & { fillStyleId: typeof state.fillStyleId }).fillStyleId = state.fillStyleId; } catch {}
         }
         restored += 1;
       }
-      if (state.strokes && "strokes" in node) {
-        node.strokes = clonePaints(state.strokes);
+      if (state.strokes && "strokes" in node && strokeNodeIds.has(state.nodeId)) {
+        node.strokes = sanitizePaints(clonePaints(state.strokes));
         if ("strokeStyleId" in node && state.strokeStyleId !== undefined) {
           try { (node as SceneNode & { strokeStyleId: string }).strokeStyleId = state.strokeStyleId as string; } catch {}
         }
         restored += 1;
       }
-      if (state.effects && "effects" in node) {
+      if (state.effects && "effects" in node && effectNodeIds.has(state.nodeId)) {
         node.effects = cloneEffects(state.effects);
         restored += 1;
       }
-      if (state.textSegments && node.type === "TEXT") {
+      if (state.textSegments && node.type === "TEXT" && textSegmentNodeIds.has(state.nodeId)) {
         for (const segment of state.textSegments) {
-          node.setRangeFills(segment.start, segment.end, clonePaints(segment.fills));
+          node.setRangeFills(
+            segment.start,
+            segment.end,
+            sanitizePaints(clonePaints(segment.fills)),
+          );
           restored += 1;
         }
       }
@@ -906,6 +1124,11 @@ export async function applyColorMapping(
       const original = paints[binding.paintIndex];
       if (original) {
         paints[binding.paintIndex] = applySolidPaint(original, mappingEntry.target);
+        if (binding.property === "fills") {
+          state.dirtyFills = true;
+        } else {
+          state.dirtyStrokes = true;
+        }
       }
       continue;
     }
@@ -924,6 +1147,11 @@ export async function applyColorMapping(
           binding.averageOklch,
           mappingEntry,
         );
+        if (binding.property === "fills") {
+          state.dirtyFills = true;
+        } else {
+          state.dirtyStrokes = true;
+        }
       }
       continue;
     }
@@ -946,6 +1174,7 @@ export async function applyColorMapping(
           a: original.color.a,
         },
       };
+      state.dirtyEffects = true;
       continue;
     }
 
@@ -969,42 +1198,55 @@ export async function applyColorMapping(
           applyGradientPaint(originalPaint, binding.averageOklch ?? mappingEntry.targetOklch, mappingEntry),
         ];
       }
+      state.dirtyTextSegments = true;
     }
   }
 
   let updated = 0;
 
-  for (const state of nextStates.values()) {
-    const node = await figma.getNodeByIdAsync(state.nodeId);
+  const states = [...nextStates.values()];
+  const nodes = await Promise.all(states.map((s) => figma.getNodeByIdAsync(s.nodeId)));
+
+  await Promise.all(
+    states.map((s, i) => {
+      const node = nodes[i];
+      return node && !node.removed && node.type === "TEXT" ? ensureFontsLoaded(s.fonts) : undefined;
+    }),
+  );
+
+  for (let i = 0; i < states.length; i++) {
+    const state = states[i];
+    const node = nodes[i];
     if (!node || node.removed) continue;
     try {
-      if (node.type === "TEXT") {
-        await ensureFontsLoaded(state.fonts);
-      }
-      if (state.fills && "fills" in node) {
+      if (state.fills && state.dirtyFills && "fills" in node) {
         if ("fillStyleId" in node) {
           try { node.fillStyleId = ""; } catch {}
         }
-        node.fills = state.fills;
+        node.fills = sanitizePaints(state.fills);
         updated += 1;
       }
-      if (state.strokes && "strokes" in node) {
+      if (state.strokes && state.dirtyStrokes && "strokes" in node) {
         if ("strokeStyleId" in node) {
           try { node.strokeStyleId = ""; } catch {}
         }
-        node.strokes = state.strokes;
+        node.strokes = sanitizePaints(state.strokes);
         updated += 1;
       }
-      if (state.effects && "effects" in node) {
+      if (state.effects && state.dirtyEffects && "effects" in node) {
         if ("effectStyleId" in node) {
           try { node.effectStyleId = ""; } catch {}
         }
         node.effects = state.effects;
         updated += 1;
       }
-      if (state.textSegments && node.type === "TEXT") {
+      if (state.textSegments && state.dirtyTextSegments && node.type === "TEXT") {
         for (const segment of state.textSegments) {
-          node.setRangeFills(segment.start, segment.end, segment.fills);
+          node.setRangeFills(
+            segment.start,
+            segment.end,
+            sanitizePaints(segment.fills),
+          );
           updated += 1;
         }
       }
