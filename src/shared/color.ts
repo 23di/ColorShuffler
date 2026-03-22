@@ -137,14 +137,7 @@ export function rgbToHex(color: SerializedColor): string {
   return `#${r}${g}${b}`.toUpperCase();
 }
 
-export function rgbToCss(color: SerializedColor): string {
-  const r = Math.round(clamp01(color.r) * 255);
-  const g = Math.round(clamp01(color.g) * 255);
-  const b = Math.round(clamp01(color.b) * 255);
-  return `rgba(${r}, ${g}, ${b}, ${clamp01(color.a).toFixed(3)})`;
-}
-
-export interface HslColor {
+interface HslColor {
   h: number;
   s: number;
   l: number;
@@ -222,14 +215,6 @@ export function hslToRgb(color: HslColor): SerializedColor {
   };
 }
 
-export function oklchToCss(color: OklchColor): string {
-  return `oklch(${(color.l * 100).toFixed(1)}% ${(
-    color.c * 100
-  ).toFixed(1)} ${normalizeHue(color.h).toFixed(1)})`;
-}
-
-export const hctToCss = oklchToCss;
-
 export function rgbToOklch(color: SerializedColor): OklchColor {
   const converted = toOklch({
     mode: "rgb",
@@ -245,8 +230,6 @@ export function rgbToOklch(color: SerializedColor): OklchColor {
     alpha: clamp01(color.a),
   };
 }
-
-export const rgbToHct = rgbToOklch;
 
 function rawOklchToRgb(color: OklchColor): SerializedColor {
   const converted = toRgb({
@@ -264,7 +247,7 @@ function rawOklchToRgb(color: OklchColor): SerializedColor {
   };
 }
 
-export function isInSrgbGamut(color: SerializedColor): boolean {
+function isInSrgbGamut(color: SerializedColor): boolean {
   return (
     color.r >= 0 &&
     color.r <= 1 &&
@@ -275,7 +258,7 @@ export function isInSrgbGamut(color: SerializedColor): boolean {
   );
 }
 
-export function clampRgb(color: SerializedColor): SerializedColor {
+function clampRgb(color: SerializedColor): SerializedColor {
   return {
     r: clamp01(color.r),
     g: clamp01(color.g),
@@ -310,8 +293,6 @@ export function oklchToRgb(
 
   return clampRgb(best);
 }
-
-export const hctToRgb = oklchToRgb;
 
 export function weightedAverageHue(
   values: Array<{ hue: number; weight: number }>,

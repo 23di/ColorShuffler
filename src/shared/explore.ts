@@ -25,16 +25,6 @@ import {
   type OklchColor,
 } from "./types";
 
-export const HUE_RANGE_PRESETS: Record<string, { min: number; max: number }> = {
-  all:     { min: 0,   max: 360 },
-  reds:    { min: 340, max: 30  },
-  yellows: { min: 50,  max: 90  },
-  greens:  { min: 95,  max: 165 },
-  cyans:   { min: 170, max: 215 },
-  blues:   { min: 220, max: 265 },
-  purples: { min: 270, max: 335 },
-};
-
 function computeHueRangeWeight(
   hue: number,
   chroma: number,
@@ -114,7 +104,7 @@ function resolveHuePreset(
   }
 }
 
-export function transformExploreColor(
+function transformExploreColor(
   color: ColorRecordSummary,
   settings: ExploreSettings,
   paletteDominantHue: number,
@@ -210,57 +200,3 @@ export function buildExploreMapping(
   return mapping;
 }
 
-export function mergeMappings(
-  base: Record<string, ColorMappingEntry>,
-  override: Record<string, ColorMappingEntry>,
-): Record<string, ColorMappingEntry> {
-  return { ...base, ...override };
-}
-
-export function colorListFromMapping(
-  mapping: Record<string, ColorMappingEntry>,
-): ColorMappingEntry[] {
-  return Object.values(mapping).sort((left, right) => {
-    if (right.role !== left.role) {
-      return left.role.localeCompare(right.role);
-    }
-
-    return right.targetOklch.c - left.targetOklch.c;
-  });
-}
-
-export function createSingleColorPreview(
-  color: ColorRecordSummary,
-  settings: ExploreSettings,
-): ColorMappingEntry {
-  const transformed = transformExploreColor(color, settings, dominantHue([color]));
-  const target = oklchToRgb(transformed, {
-    clampToGamut: settings.clampOutOfGamut,
-  });
-
-  return {
-    key: buildColorKey(target),
-    source: color.rgb,
-    sourceHex: color.hex,
-    target,
-    targetHex: rgbToHex(target),
-    targetOklch: transformed,
-    role: color.role,
-  };
-}
-
-export function applySurpriseMe(current: ExploreSettings): ExploreSettings {
-  const shifts = [-45, -30, 20, 30, 45, 180, -150, 150, -20];
-  const hueShift = shifts[Math.floor(Math.random() * shifts.length)];
-  const chromaScale = Number((0.82 + Math.random() * 0.46).toFixed(2));
-  return {
-    ...current,
-    hueShift,
-    exposure: 0,
-    contrast: 0,
-    vibrance: 0,
-    saturation: 0,
-    chromaScale,
-    huePreset: "none",
-  };
-}
