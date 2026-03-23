@@ -105,6 +105,7 @@ export interface SelectionAnalysisInternal {
   summary: SelectionAnalysisSummary;
   bindings: NodeBinding[];
   originalStates: Map<string, NodeOriginalState>;
+  nodeById: Map<string, SceneNode>;
   rootNodeIds: string[];
 }
 
@@ -368,6 +369,18 @@ function findNearestBackground(node: SceneNode): SerializedColor | null {
   return null;
 }
 
+function getNearestBackground(
+  node: SceneNode,
+  cache: Map<string, SerializedColor | null>,
+): SerializedColor | null {
+  if (cache.has(node.id)) {
+    return cache.get(node.id) ?? null;
+  }
+  const background = findNearestBackground(node);
+  cache.set(node.id, background);
+  return background;
+}
+
 function recordSurfaceContext(
   contexts: Map<string, TextContextAggregate | ForegroundContextAggregate>,
   sourceKey: string,
@@ -501,14 +514,17 @@ function inspectPaintArray(
   paints: ReadonlyArray<Paint>,
   aggregates: Map<string, ColorAggregate>,
   bindings: NodeBinding[],
+  backgroundCache: Map<string, SerializedColor | null>,
   textContexts?: Map<string, TextContextAggregate>,
   foregroundContexts?: Map<string, ForegroundContextAggregate>,
 ): void {
   const textBackground =
-    node.type === "TEXT" && property === "fills" ? findNearestBackground(node) : null;
+    node.type === "TEXT" && property === "fills"
+      ? getNearestBackground(node, backgroundCache)
+      : null;
   const localBackground =
     node.type !== "TEXT" && isForegroundIconCandidate(node, property)
-      ? findNearestBackground(node)
+      ? getNearestBackground(node, backgroundCache)
       : null;
   paints.forEach((paint, paintIndex) => {
     if (!paintVisible(paint)) return;
@@ -576,8 +592,9 @@ function inspectTextSegments(
   aggregates: Map<string, ColorAggregate>,
   bindings: NodeBinding[],
   textContexts: Map<string, TextContextAggregate>,
+  backgroundCache: Map<string, SerializedColor | null>,
 ): void {
-  const background = findNearestBackground(node);
+  const background = getNearestBackground(node, backgroundCache);
   const segments = node.getStyledTextSegments(["fills"]);
   for (const segment of segments) {
     if (!Array.isArray(segment.fills)) continue;
@@ -745,11 +762,14 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
   const foregroundContexts = new Map<string, ForegroundContextAggregate>();
   const bindings: NodeBinding[] = [];
   const originalStates = new Map<string, NodeOriginalState>();
+  const nodeById = new Map<string, SceneNode>();
+  const backgroundCache = new Map<string, SerializedColor | null>();
   let fillAreaTotal = 0;
   let fillLightnessWeighted = 0;
 
   for (const node of nodes) {
     if ("visible" in node && node.visible === false) continue;
+    nodeById.set(node.id, node);
     if ("fills" in node && Array.isArray(node.fills)) {
       originalStates.set(node.id, {
         ...(originalStates.get(node.id) ?? { nodeId: node.id }),
@@ -763,6 +783,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
         node.fills,
         aggregates,
         bindings,
+        backgroundCache,
         textContexts,
         foregroundContexts,
       );
@@ -780,7 +801,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
         textSegments: captureTextSegments(node),
         fonts: cloneFonts(uniqueFontsForText(node)),
       });
-      inspectTextSegments(node, aggregates, bindings, textContexts);
+      inspectTextSegments(node, aggregates, bindings, textContexts, backgroundCache);
     }
 
     if ("strokes" in node && Array.isArray(node.strokes)) {
@@ -798,6 +819,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
         node.strokes,
         aggregates,
         bindings,
+        backgroundCache,
         textContexts,
         foregroundContexts,
       );
@@ -843,6 +865,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
     ),
     bindings,
     originalStates,
+    nodeById,
     rootNodeIds: roots.map((node) => node.id),
   };
 }
@@ -972,7 +995,7 @@ function isMissingNodeMutationError(error: unknown): boolean {
 export function restoreSelectionSync(analysis: SelectionAnalysisInternal): void {
   for (const state of analysis.originalStates.values()) {
     try {
-      const node = figma.getNodeById(state.nodeId);
+      const node = analysis.nodeById.get(state.nodeId) ?? figma.getNodeById(state.nodeId);
       if (!node || node.removed) continue;
       if (state.fills && "fills" in node) {
         node.fills = sanitizePaints(clonePaints(state.fills));
@@ -1041,14 +1064,12 @@ export async function restoreSelection(
   let restored = 0;
 
   const states = [...analysis.originalStates.values()];
-  const nodes = await Promise.all(states.map((s) => figma.getNodeByIdAsync(s.nodeId)));
+  const nodes = states.map((state) => analysis.nodeById.get(state.nodeId) ?? null);
 
-  await Promise.all(
-    states.map((s, i) => {
-      const node = nodes[i];
-      return node && !node.removed && node.type === "TEXT" ? ensureFontsLoaded(s.fonts) : undefined;
-    }),
-  );
+  await Promise.all(states.map((s, i) => {
+    const node = nodes[i];
+    return node && !node.removed && node.type === "TEXT" ? ensureFontsLoaded(s.fonts) : undefined;
+  }));
 
   for (let i = 0; i < states.length; i++) {
     const state = states[i];
@@ -1205,14 +1226,12 @@ export async function applyColorMapping(
   let updated = 0;
 
   const states = [...nextStates.values()];
-  const nodes = await Promise.all(states.map((s) => figma.getNodeByIdAsync(s.nodeId)));
+  const nodes = states.map((state) => analysis.nodeById.get(state.nodeId) ?? null);
 
-  await Promise.all(
-    states.map((s, i) => {
-      const node = nodes[i];
-      return node && !node.removed && node.type === "TEXT" ? ensureFontsLoaded(s.fonts) : undefined;
-    }),
-  );
+  await Promise.all(states.map((s, i) => {
+    const node = nodes[i];
+    return node && !node.removed && node.type === "TEXT" ? ensureFontsLoaded(s.fonts) : undefined;
+  }));
 
   for (let i = 0; i < states.length; i++) {
     const state = states[i];

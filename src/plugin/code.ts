@@ -1,7 +1,7 @@
 declare const __html__: string;
 
 import type { PluginToUiMessage, UiToPluginMessage } from "../shared/messages";
-import type { SelectionAnalysisSummary } from "../shared/types";
+import type { ColorMappingEntry } from "../shared/types";
 import {
   applyColorMapping,
   extractSelectionAnalysis,
@@ -28,6 +28,9 @@ let baselineAnalysis: SelectionAnalysisInternal | null = null;
 let previewActive = false;
 let uiFocused = true;
 let selectionSignatureOnBlur: string | null = null;
+let canvasMutationQueue: Promise<void> = Promise.resolve();
+let queuedPreviewMapping: ColorMappingEntry[] | null = null;
+let previewFlushPromise: Promise<void> | null = null;
 
 function buildAnalysisRootKey(analysis: SelectionAnalysisInternal | null): string {
   if (!analysis) {
@@ -40,26 +43,64 @@ function postMessage(message: PluginToUiMessage): void {
   figma.ui.postMessage(message);
 }
 
-function buildSelectionSignature(summary: SelectionAnalysisSummary | null): string {
-  if (!summary) {
+function captureCurrentSelectionSignature(): string {
+  const selection = figma.currentPage.selection;
+  if (selection.length === 0) {
     return "empty";
   }
 
-  return JSON.stringify({
-    nodeCount: summary.nodeCount,
-    layerCount: summary.layerCount,
-    uniqueColorCount: summary.uniqueColorCount,
-    colors: summary.colors.map((color) => ({
-      key: color.key,
-      usageCount: color.usageCount,
-      nodeCount: color.nodeCount,
-      sourceKinds: color.sourceKinds,
-    })),
-  });
+  return selection
+    .map((node) => node.id)
+    .sort()
+    .join("|");
 }
 
-function captureCurrentSelectionSignature(): string {
-  return buildSelectionSignature(extractSelectionAnalysis()?.summary ?? null);
+function enqueueCanvasMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = canvasMutationQueue.then(operation, operation);
+  canvasMutationQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+async function flushQueuedPreview(): Promise<void> {
+  if (previewFlushPromise) {
+    await previewFlushPromise;
+    return;
+  }
+
+  previewFlushPromise = enqueueCanvasMutation(async () => {
+    try {
+      let lastUpdated = 0;
+
+      while (queuedPreviewMapping) {
+        const mapping = queuedPreviewMapping;
+        queuedPreviewMapping = null;
+
+        if (!currentAnalysis) {
+          await refreshSelection();
+        }
+        if (!currentAnalysis) {
+          continue;
+        }
+
+        lastUpdated = await applyColorMapping(currentAnalysis, mapping);
+        previewActive = true;
+      }
+
+      if (previewActive) {
+        postMessage({ type: "preview-applied", count: lastUpdated });
+      }
+    } finally {
+      previewFlushPromise = null;
+      if (queuedPreviewMapping) {
+        void flushQueuedPreview();
+      }
+    }
+  });
+
+  await previewFlushPromise;
 }
 
 async function refreshSelection(options?: { preserveCurrentCanvas?: boolean }): Promise<void> {
@@ -103,7 +144,7 @@ figma.on("selectionchange", () => {
   // even if the plugin panel doesn't have keyboard focus at that moment.
   // preserveCurrentCanvas = true: don't attempt to restore a preview that was
   // painted on a frame the user may have just navigated away from.
-  void refreshSelection({ preserveCurrentCanvas: true });
+  void enqueueCanvasMutation(() => refreshSelection({ preserveCurrentCanvas: true }));
 });
 
 figma.on("close", () => {
@@ -120,7 +161,7 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
   try {
     switch (message.type) {
       case "scan-selection": {
-        await refreshSelection();
+        await enqueueCanvasMutation(() => refreshSelection());
         return;
       }
       case "ui-focus": {
@@ -136,7 +177,7 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
         selectionSignatureOnBlur = null;
 
         if (selectionChangedWhileBlurred) {
-          await refreshSelection({ preserveCurrentCanvas: true });
+          await enqueueCanvasMutation(() => refreshSelection({ preserveCurrentCanvas: true }));
         }
         return;
       }
@@ -147,56 +188,59 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
         return;
       }
       case "preview-colors": {
-        if (!currentAnalysis) {
-          await refreshSelection();
-        }
-        if (!currentAnalysis) return;
-
-        const updated = await applyColorMapping(currentAnalysis, message.mapping);
-        previewActive = true;
-        postMessage({ type: "preview-applied", count: updated });
+        queuedPreviewMapping = message.mapping;
+        await flushQueuedPreview();
         return;
       }
       case "clear-preview": {
-        if (previewActive && (baselineAnalysis ?? currentAnalysis)) {
-          await restoreSelection(baselineAnalysis ?? currentAnalysis!);
-        }
-        previewActive = false;
-        postMessage({ type: "preview-cleared" });
+        queuedPreviewMapping = null;
+        await enqueueCanvasMutation(async () => {
+          if (previewActive && (baselineAnalysis ?? currentAnalysis)) {
+            await restoreSelection(baselineAnalysis ?? currentAnalysis!);
+          }
+          previewActive = false;
+          postMessage({ type: "preview-cleared" });
+        });
         return;
       }
       case "restore-baseline": {
-        if (baselineAnalysis) {
-          await restoreSelection(baselineAnalysis);
-          previewActive = false;
-          currentAnalysis = extractSelectionAnalysis();
-          if (currentAnalysis) {
-            postMessage({ type: "selection-analysis", payload: currentAnalysis.summary });
-          } else {
-            baselineAnalysis = null;
-            postMessage({
-              type: "selection-empty",
-              message:
-                "Select a frame or layers with fills, strokes, or text colors to analyze them in HCT.",
-            });
+        queuedPreviewMapping = null;
+        await enqueueCanvasMutation(async () => {
+          if (baselineAnalysis) {
+            await restoreSelection(baselineAnalysis);
+            previewActive = false;
+            currentAnalysis = extractSelectionAnalysis();
+            if (currentAnalysis) {
+              postMessage({ type: "selection-analysis", payload: currentAnalysis.summary });
+            } else {
+              baselineAnalysis = null;
+              postMessage({
+                type: "selection-empty",
+                message:
+                  "Select a frame or layers with fills, strokes, or text colors to analyze them in HCT.",
+              });
+            }
+          } else if (currentAnalysis && previewActive) {
+            await restoreSelection(currentAnalysis);
+            previewActive = false;
+            postMessage({ type: "preview-cleared" });
           }
-        } else if (currentAnalysis && previewActive) {
-          await restoreSelection(currentAnalysis);
-          previewActive = false;
-          postMessage({ type: "preview-cleared" });
-        }
+        });
         return;
       }
       case "apply-colors": {
-        if (!currentAnalysis) {
-          await refreshSelection();
-        }
-        if (!currentAnalysis) return;
+        queuedPreviewMapping = null;
+        await enqueueCanvasMutation(async () => {
+          if (!currentAnalysis) {
+            await refreshSelection();
+          }
+          if (!currentAnalysis) return;
 
-        await applyColorMapping(currentAnalysis, message.mapping);
-        previewActive = false;
-        figma.notify("Colors applied to the current selection.");
-        await refreshSelection();
+          await applyColorMapping(currentAnalysis, message.mapping);
+          previewActive = false;
+          figma.notify("Colors applied to the current selection.");
+          await refreshSelection();
+        });
         return;
       }
       default: {

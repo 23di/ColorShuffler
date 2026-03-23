@@ -3,3 +3,4 @@ dist
 .DS_Store
 .claude
 export
+src/ui/figma-export.html

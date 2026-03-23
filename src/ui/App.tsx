@@ -76,6 +76,28 @@ type ExtraHueGroup = {
   chromaScale: number;
 };
 
+const EXTRA_HUE_LINK_MODE_OPTIONS: Array<{
+  value: ExtraHueGroupLinkMode;
+  label: string;
+}> = [
+  { value: "manual", label: "Free hue" },
+  { value: "monochrome", label: "Monochrome" },
+  { value: "complement", label: "Complementary" },
+  { value: "split-plus", label: "Split comp +" },
+  { value: "split-minus", label: "Split comp -" },
+  { value: "analog-plus", label: "Analog +" },
+  { value: "analog-wide-plus", label: "Analog wide +" },
+  { value: "analog-minus", label: "Analog -" },
+  { value: "analog-wide-minus", label: "Analog wide -" },
+  { value: "triad", label: "Triad" },
+  { value: "triad-minus", label: "Triad -" },
+  { value: "square-plus", label: "Square +" },
+  { value: "square-minus", label: "Square -" },
+  { value: "tetrad-plus", label: "Tetrad +" },
+  { value: "tetrad-opposite", label: "Tetrad opposite" },
+  { value: "tetrad-minus", label: "Tetrad -" },
+];
+
 const DEFAULT_UI_WIDTH = 380;
 const MIN_UI_WIDTH = 380;
 const MAX_UI_WIDTH = 760;
@@ -477,6 +499,10 @@ function createNeutralExtraHueGroup(primaryHueShift: number): ExtraHueGroup {
   };
 }
 
+function isButtonTarget(target: EventTarget | null): target is HTMLElement {
+  return target instanceof HTMLElement && Boolean(target.closest("button"));
+}
+
 function App() {
   const [analysis, setAnalysis] = useState<SelectionAnalysisSummary | null>(null);
   const [status, setStatus] = useState("Reading current selection…");
@@ -622,6 +648,7 @@ function App() {
     () => new Map((deferredAnalysis?.colors ?? []).map((color) => [color.key, color])),
     [deferredAnalysis],
   );
+  const sourceColors = deferredAnalysis?.colors ?? [];
   const sourceTheme = deferredAnalysis?.themeDetection?.inferredSourceTheme ?? "light";
   const targetTheme: ThemeTarget = sourceTheme === "dark" ? "light" : "dark";
   const exploreRoleByKey = useMemo(
@@ -647,6 +674,20 @@ function App() {
     () => new Map(frameGroups.map((group) => [group.id, group])),
     [frameGroups],
   );
+  const groupColorsById = useMemo(() => {
+    const next = new Map<string, AnalysisColor[]>();
+    for (const group of frameGroups) {
+      const groupColors: AnalysisColor[] = [];
+      for (const key of group.memberKeys) {
+        const color = analysisColorByKey.get(key);
+        if (color) {
+          groupColors.push(color);
+        }
+      }
+      next.set(group.id, groupColors);
+    }
+    return next;
+  }, [analysisColorByKey, frameGroups]);
   const allColorKeys = useMemo(
     () => new Set((deferredAnalysis?.colors ?? []).map((color) => color.key)),
     [deferredAnalysis],
@@ -665,6 +706,10 @@ function App() {
     () => createPrimaryScopeSettings(effectiveExploreSettings, settings.hueShift),
     [effectiveExploreSettings, settings.hueShift],
   );
+  const identityMappingByKey = useMemo(
+    () => new Map(sourceColors.map((color) => [color.key, createIdentityMappingEntry(color)])),
+    [sourceColors],
+  );
 
   const demoEntries = useMemo<ColorMappingEntry[]>(() => {
     const extraHueKeys = new Set<string>();
@@ -681,12 +726,9 @@ function App() {
       extraHueKeys,
     );
 
-    const sourceColors = deferredAnalysis?.colors ?? [];
-    const originalIdentityByKey = new Map(
-      sourceColors.map((color) => [color.key, createIdentityMappingEntry(color)]),
-    );
-
-    const primaryColors = sourceColors.filter((color) => primaryHueKeys.has(color.key));
+    const primaryColors = [...primaryHueKeys]
+      .map((key) => analysisColorByKey.get(key))
+      .filter((color): color is AnalysisColor => Boolean(color));
     const primaryHueBaseMapping =
       primaryColors.length > 0
         ? buildExploreMapping(primaryColors, primaryHueSettings, exploreRoleByKey)
@@ -702,8 +744,7 @@ function App() {
 
     const extraHueMapping = extraHueGroups.reduce<Record<string, ColorMappingEntry>>(
       (combined, group) => {
-        const groupKeys = new Set(frameGroupById.get(group.scopeId)?.memberKeys ?? []);
-        const groupColors = sourceColors.filter((color) => groupKeys.has(color.key));
+        const groupColors = groupColorsById.get(group.scopeId) ?? [];
         if (groupColors.length === 0) {
           return combined;
         }
@@ -760,20 +801,23 @@ function App() {
     );
 
     return sourceColors.map((color) => {
-      const identity = originalIdentityByKey.get(color.key) ?? createIdentityMappingEntry(color);
+      const identity = identityMappingByKey.get(color.key) ?? createIdentityMappingEntry(color);
       return extraHueMapping[color.key] ?? primaryHueMapping[color.key] ?? identity;
     });
   }, [
     allColorKeys,
-    deferredAnalysis,
+    analysisColorByKey,
     effectiveExploreSettings,
     exploreRoleByKey,
     extraHueGroups,
     frameGroupById,
+    groupColorsById,
+    identityMappingByKey,
     primaryHueScope,
     primaryHueSettings,
     primaryTintEnabled,
     settings.hueShift,
+    sourceColors,
   ]);
 
   const themedDemoEntries = useMemo(
@@ -834,14 +878,6 @@ function App() {
     if (lastMappingRef.current.length > 0) {
       postMsg({ type: "preview-colors", mapping: lastMappingRef.current });
     }
-  };
-
-  const handleHueScopeChange = (nextScope: HueScopeId) => {
-    if (nextScope === "all") {
-      setPrimaryHueScope("all");
-      return;
-    }
-    setPrimaryHueScope((current) => (current === nextScope ? "all" : nextScope));
   };
 
   const handleAddExtraHueGroup = (scopeId: string) => {
@@ -973,141 +1009,135 @@ function App() {
 
   return (
     <div className="shell" ref={shellRef}>
-    <div ref={innerRef} className="shell-inner">
-      {!analysis ? (
-        <div className="empty">
-          <IconEmptyState />
-          <p className="empty-text">Select a frame or layers with fills, strokes, or text colors to analyze them.</p>
-        </div>
-      ) : (
-        <div className="content">
-          <Section>
-            <div className="control-stack">
-              <div
-                className={`main-controls hue-group-card main-controls-card${allChromaticGroupsSeparated ? " main-controls-disabled" : ""}`}
-              >
-                <div className="hue-group-header main-controls-header">
-                  <div className="group-toggle group-toggle-static">
-                    <div className="hue-group-copy">
-                      <strong>All colors</strong>
+      <div ref={innerRef} className={`shell-inner${analysis ? "" : " is-empty"}`}>
+        {!analysis ? (
+          <div className="empty">
+            <IconEmptyState />
+            <p className="empty-text">Select a frame or layers with fills, strokes, or text colors to analyze them.</p>
+          </div>
+        ) : (
+          <div className="content">
+            <Section>
+              <div className="control-stack">
+                <div
+                  className={`main-controls hue-group-card main-controls-card${allChromaticGroupsSeparated ? " main-controls-disabled" : ""}`}
+                >
+                  <CardHeader
+                    title="All colors"
+                    actions={
+                      <div className="toggle-row main-toggle-row">
+                        <ToggleCheck
+                          label="Tint"
+                          checked={primaryTintEnabled}
+                          disabled={allChromaticGroupsSeparated}
+                          onChange={setPrimaryTintEnabled}
+                        />
+                      </div>
+                    }
+                  />
+                  <div className="hue-cluster">
+                    <RangeField
+                      label="Hue"
+                      min={-180}
+                      max={180}
+                      step={1}
+                      value={settings.hueShift}
+                      display={fmt(settings.hueShift, "°")}
+                      resetValue={0}
+                      variant="hue"
+                      disabled={allChromaticGroupsSeparated}
+                      onChange={(value) =>
+                        setSettings((current) => ({ ...current, hueShift: value }))
+                      }
+                    />
+                    <div className="button-row compact hue-quick-row">
+                      {(["-30", "+30", "comp", "analog"] as const).map((preset) => (
+                        <button
+                          key={`primary-${preset}`}
+                          className="btn-ghost"
+                          disabled={allChromaticGroupsSeparated}
+                          onClick={() => handleHueQuickShift(preset)}
+                        >
+                          {preset === "-30"
+                            ? "−30°"
+                            : preset === "+30"
+                              ? "+30°"
+                              : preset === "comp"
+                                ? "Comp"
+                                : "Analog"}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  <div className="toggle-row main-toggle-row">
-                    <ToggleCheck
-                      label="Tint"
-                      checked={primaryTintEnabled}
-                      disabled={allChromaticGroupsSeparated}
-                      onChange={setPrimaryTintEnabled}
-                    />
-                  </div>
-                  </div>
-                <div className="hue-cluster">
+
                   <RangeField
-                    label="Hue"
-                    min={-180}
-                    max={180}
+                    label="Exposure"
+                    min={-100}
+                    max={100}
                     step={1}
-                    value={settings.hueShift}
-                    display={fmt(settings.hueShift, "°")}
+                    value={settings.exposure}
+                    display={fmt(settings.exposure)}
                     resetValue={0}
-                    variant="hue"
                     disabled={allChromaticGroupsSeparated}
-                    onChange={(value) => setSettings((current) => ({ ...current, hueShift: value }))}
+                    onChange={(value) =>
+                      setSettings((current) => ({ ...current, exposure: value }))
+                    }
                   />
-                  <div className="button-row compact hue-quick-row">
-                    {(["-30", "+30", "comp", "analog"] as const).map((preset) => (
-                      <button
-                        key={`primary-${preset}`}
-                        className="btn-ghost"
-                        disabled={allChromaticGroupsSeparated}
-                        onClick={() => handleHueQuickShift(preset)}
-                      >
-                        {preset === "-30"
-                          ? "−30°"
-                          : preset === "+30"
-                            ? "+30°"
-                            : preset === "comp"
-                              ? "Comp"
-                              : "Analog"}
-                      </button>
-                    ))}
-                  </div>
+                  <RangeField
+                    label="Chroma scale"
+                    min={0}
+                    max={200}
+                    step={1}
+                    value={Math.round(settings.chromaScale * 100)}
+                    display={`${Math.round(settings.chromaScale * 100)}%`}
+                    resetValue={100}
+                    className="main-chroma-field"
+                    disabled={allChromaticGroupsSeparated}
+                    onChange={(value) =>
+                      setSettings((current) => ({ ...current, chromaScale: value / 100 }))
+                    }
+                  />
                 </div>
 
-                <RangeField
-                  label="Exposure"
-                  min={-100}
-                  max={100}
-                  step={1}
-                  value={settings.exposure}
-                  display={fmt(settings.exposure)}
-                  resetValue={0}
-                  disabled={allChromaticGroupsSeparated}
-                  onChange={(value) => setSettings((current) => ({ ...current, exposure: value }))}
-                />
-                <RangeField
-                  label="Chroma scale"
-                  min={0}
-                  max={200}
-                  step={1}
-                  value={Math.round(settings.chromaScale * 100)}
-                  display={`${Math.round(settings.chromaScale * 100)}%`}
-                  resetValue={100}
-                  className="main-chroma-field"
-                  disabled={allChromaticGroupsSeparated}
-                  onChange={(value) =>
-                    setSettings((current) => ({ ...current, chromaScale: value / 100 }))
-                  }
-                />
-              </div>
+                {extraHueGroups.length > 0 ? (
+                  <div className="extra-hue-group-stack">
+                    {extraHueGroups.map((group) => {
+                      const scope = frameGroupById.get(group.scopeId);
+                      if (!scope) return null;
 
-              {extraHueGroups.length > 0 ? (
-                <div className="extra-hue-group-stack">
-                  {extraHueGroups.map((group) => {
-                    const scope = frameGroupById.get(group.scopeId);
-                    if (!scope) return null;
+                      const effectiveGroup = resolveEffectiveExtraHueGroup(
+                        group,
+                        settings.hueShift,
+                      );
+                      const isLinkedPreset = group.linkMode !== "manual";
+                      const effectiveHueShift = effectiveGroup.hueShift;
+                      const effectiveGroupHue = normalizeHue(effectiveHueShift);
+                      const hasAccentSurface = group.scopeId !== "neutral";
+                      const groupStyle = {
+                        "--group-accent": hasAccentSurface
+                          ? `hsl(${effectiveGroupHue} 86% 58%)`
+                          : "transparent",
+                      } as CSSProperties;
 
-                    const effectiveGroup = resolveEffectiveExtraHueGroup(group, settings.hueShift);
-                    const isLinkedPreset = group.linkMode !== "manual";
-                    const effectiveHueShift = effectiveGroup.hueShift;
-                    const effectiveGroupHue = normalizeHue(effectiveHueShift);
-                    const hasAccentSurface = group.scopeId !== "neutral";
-                    const groupStyle = {
-                      "--group-accent": hasAccentSurface
-                        ? `hsl(${effectiveGroupHue} 86% 58%)`
-                        : "transparent",
-                    } as CSSProperties;
-
-                    return (
-                      <div
-                        key={group.id}
-                        className={`hue-group-card${hasAccentSurface ? "" : " is-neutral-card"}${!collapsedGroups[group.id] ? " is-open" : ""}`}
-                        style={groupStyle}
-                        onClick={collapsedGroups[group.id] ? (e) => {
-                          if (!(e.target as HTMLElement).closest("button")) toggleGroupCollapsed(group.id);
-                        } : undefined}
-                      >
-                        <div
-                          className="hue-group-header"
-                          onClick={!collapsedGroups[group.id] ? (e) => {
-                            if (!(e.target as HTMLElement).closest("button")) toggleGroupCollapsed(group.id);
-                          } : undefined}
-                        >
-                          <button
-                            className="group-toggle"
-                            type="button"
-                            onClick={() => toggleGroupCollapsed(group.id)}
-                            aria-expanded={!collapsedGroups[group.id]}
-                          >
-                            <div className="hue-group-copy">
-                              <strong>
-                                {scope.name}{" "}
-                                <span className="hue-group-count">{scope.memberKeys.length}</span>
-                              </strong>
-                            </div>
-                          </button>
-                          <div className="hue-group-actions">
-                            {group.scopeId !== "neutral" ? (
+                      return (
+                        <CollapsibleCard
+                          key={group.id}
+                          className={`hue-group-card${hasAccentSurface ? "" : " is-neutral-card"}${!collapsedGroups[group.id] ? " is-open" : ""}`}
+                          style={groupStyle}
+                          title={
+                            <>
+                              {scope.name}{" "}
+                              <span className="hue-group-count">{scope.memberKeys.length}</span>
+                            </>
+                          }
+                          collapsed={collapsedGroups[group.id]}
+                          onToggle={() => toggleGroupCollapsed(group.id)}
+                          chevronLabel={{
+                            expand: `Expand ${scope.name}`,
+                            collapse: `Collapse ${scope.name}`,
+                          }}
+                          actions={
+                            group.scopeId !== "neutral" ? (
                               <button
                                 className="btn-ghost icon-btn"
                                 title={`Remove ${scope.name}`}
@@ -1116,324 +1146,394 @@ function App() {
                               >
                                 <IconMinus />
                               </button>
-                            ) : null}
-                          </div>
-                          <button
-                            className="group-chevron-btn icon-btn"
-                            type="button"
-                            onClick={() => toggleGroupCollapsed(group.id)}
-                            aria-label={collapsedGroups[group.id] ? `Expand ${scope.name}` : `Collapse ${scope.name}`}
-                            aria-expanded={!collapsedGroups[group.id]}
-                          >
-                            <span className={`group-chevron${collapsedGroups[group.id] ? " is-collapsed" : ""}`}>
-                              <IconChevronDown />
-                            </span>
-                          </button>
-                        </div>
-                        <div
-                          className={`collapsible-grid${collapsedGroups[group.id] ? " is-collapsed" : ""}`}
-                          aria-hidden={collapsedGroups[group.id]}
+                            ) : null
+                          }
                         >
-                          <div className="collapsible-grid-inner">
+                          <RangeField
+                            label={
+                              <SelectField
+                                ariaLabel={`${scope.name} hue link mode`}
+                                value={group.linkMode}
+                                unstyled
+                                onChange={(value) =>
+                                  handleExtraHueGroupLinkModeChange(
+                                    group.id,
+                                    value as ExtraHueGroupLinkMode,
+                                  )
+                                }
+                                options={EXTRA_HUE_LINK_MODE_OPTIONS}
+                              />
+                            }
+                            min={-180}
+                            max={180}
+                            step={1}
+                            value={effectiveHueShift}
+                            display={fmt(effectiveHueShift, "°")}
+                            resetValue={0}
+                            variant="hue"
+                            softDisabled={isLinkedPreset}
+                            onChange={(value) =>
+                              handleExtraHueGroupManualSliderChange(group.id, {
+                                hueShift: value,
+                              })
+                            }
+                          />
+                          <RangeField
+                            label="Exposure"
+                            min={-100}
+                            max={100}
+                            step={1}
+                            value={effectiveGroup.exposure}
+                            display={fmt(effectiveGroup.exposure)}
+                            resetValue={0}
+                            softDisabled={isLinkedPreset}
+                            onChange={(value) =>
+                              handleExtraHueGroupManualSliderChange(group.id, {
+                                exposure: value,
+                              })
+                            }
+                          />
+                          {group.scopeId === "neutral" ? (
                             <RangeField
-                              label={
-                                <SelectField
-                                  ariaLabel={`${scope.name} hue link mode`}
-                                  value={group.linkMode}
-                                  unstyled
-                                  onChange={(value) =>
-                                    handleExtraHueGroupLinkModeChange(
-                                      group.id,
-                                      value as ExtraHueGroupLinkMode,
-                                    )
-                                  }
-                                  options={[
-                                    { value: "manual", label: "Free hue" },
-                                    { value: "monochrome", label: "Monochrome" },
-                                    { value: "complement", label: "Complementary" },
-                                    { value: "split-plus", label: "Split comp +" },
-                                    { value: "split-minus", label: "Split comp -" },
-                                    { value: "analog-plus", label: "Analog +" },
-                                    { value: "analog-wide-plus", label: "Analog wide +" },
-                                    { value: "analog-minus", label: "Analog -" },
-                                    { value: "analog-wide-minus", label: "Analog wide -" },
-                                    { value: "triad", label: "Triad" },
-                                    { value: "triad-minus", label: "Triad -" },
-                                    { value: "square-plus", label: "Square +" },
-                                    { value: "square-minus", label: "Square -" },
-                                    { value: "tetrad-plus", label: "Tetrad +" },
-                                    { value: "tetrad-opposite", label: "Tetrad opposite" },
-                                    { value: "tetrad-minus", label: "Tetrad -" },
-                                  ]}
-                                />
-                              }
-                              min={-180}
-                              max={180}
-                              step={1}
-                              value={effectiveHueShift}
-                              display={fmt(effectiveHueShift, "°")}
-                              resetValue={0}
-                              variant="hue"
-                              softDisabled={isLinkedPreset}
-                              onChange={(value) =>
-                                handleExtraHueGroupManualSliderChange(group.id, {
-                                  hueShift: value,
-                                })
-                              }
-                            />
-                            <RangeField
-                              label="Exposure"
+                              label="Contrast"
                               min={-100}
                               max={100}
                               step={1}
-                              value={effectiveGroup.exposure}
-                              display={fmt(effectiveGroup.exposure)}
+                              value={effectiveGroup.contrast}
+                              display={fmt(effectiveGroup.contrast)}
                               resetValue={0}
                               softDisabled={isLinkedPreset}
                               onChange={(value) =>
                                 handleExtraHueGroupManualSliderChange(group.id, {
-                                  exposure: value,
+                                  contrast: value,
                                 })
                               }
                             />
-                            {group.scopeId === "neutral" ? (
-                              <RangeField
-                                label="Contrast"
-                                min={-100}
-                                max={100}
-                                step={1}
-                                value={effectiveGroup.contrast}
-                                display={fmt(effectiveGroup.contrast)}
-                                resetValue={0}
-                                softDisabled={isLinkedPreset}
-                                onChange={(value) =>
-                                  handleExtraHueGroupManualSliderChange(group.id, {
-                                    contrast: value,
-                                  })
-                                }
-                              />
-                            ) : null}
-                            <RangeField
-                              label="Chroma scale"
-                              min={0}
-                              max={200}
-                              step={1}
-                              value={Math.round(effectiveGroup.chromaScale * 100)}
-                              display={`${Math.round(effectiveGroup.chromaScale * 100)}%`}
-                              resetValue={100}
-                              softDisabled={isLinkedPreset}
-                              onChange={(value) =>
-                                handleExtraHueGroupManualSliderChange(group.id, {
-                                  chromaScale: value / 100,
-                                })
-                              }
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              <div className="extra-hue-picker">
-                <div className="extra-hue-picker-head">
-                  <strong>Separate control</strong>
-                </div>
-                {chromaticGroups.length > 0 ? (
-                  <div className="button-row hue-add-row">
-                    {chromaticGroups.map((group) => {
-                      const isAdded = addedExtraGroupScopeIds.has(group.id);
-                      return (
-                        <button
-                          key={`add-${group.id}`}
-                          className={`hue-add-btn${isAdded ? " is-added" : ""}`}
-                          disabled={isAdded}
-                          onClick={() => handleAddExtraHueGroup(group.id)}
-                        >
-                          {isAdded ? (
-                            group.name
-                          ) : (
-                            <>
-                              <span className="btn-icon hue-add-icon">
-                                <IconPlus />
-                              </span>
-                              <span>{group.name}</span>
-                            </>
-                          )}
-                        </button>
+                          ) : null}
+                          <RangeField
+                            label="Chroma scale"
+                            min={0}
+                            max={200}
+                            step={1}
+                            value={Math.round(effectiveGroup.chromaScale * 100)}
+                            display={`${Math.round(effectiveGroup.chromaScale * 100)}%`}
+                            resetValue={100}
+                            softDisabled={isLinkedPreset}
+                            onChange={(value) =>
+                              handleExtraHueGroupManualSliderChange(group.id, {
+                                chromaScale: value / 100,
+                              })
+                            }
+                          />
+                        </CollapsibleCard>
                       );
                     })}
                   </div>
-                ) : (
-                  <p className="muted">No chromatic color groups detected on this page yet.</p>
-                )}
-              </div>
-            </div>
-          </Section>
+                ) : null}
 
-          {themeFlipEnabled && <Section>
-            <div
-              className={`hue-group-card theme-settings-card${!themeSettingsCollapsed ? " is-open" : ""}`}
-              onClick={themeSettingsCollapsed ? (e) => {
-                if (!(e.target as HTMLElement).closest("button")) setThemeSettingsCollapsed(false);
-              } : undefined}
-            >
-              <div
-                className="hue-group-header"
-                onClick={!themeSettingsCollapsed ? (e) => {
-                  if (!(e.target as HTMLElement).closest("button")) setThemeSettingsCollapsed((v) => !v);
-                } : undefined}
-              >
-                <button
-                  className="group-toggle"
-                  type="button"
-                  onClick={() => setThemeSettingsCollapsed((v) => !v)}
-                  aria-expanded={!themeSettingsCollapsed}
-                >
-                  <div className="hue-group-copy">
-                    <strong>Invert colors</strong>
+                <div className="extra-hue-picker">
+                  <div className="extra-hue-picker-head">
+                    <strong>Separate control</strong>
                   </div>
-                </button>
-                <button
-                  className="group-chevron-btn icon-btn"
-                  type="button"
-                  onClick={() => setThemeSettingsCollapsed((v) => !v)}
-                  aria-label={themeSettingsCollapsed ? "Expand invert colors" : "Collapse invert colors"}
-                  aria-expanded={!themeSettingsCollapsed}
-                >
-                  <span className={`group-chevron${themeSettingsCollapsed ? " is-collapsed" : ""}`}>
-                    <IconChevronDown />
-                  </span>
-                </button>
-              </div>
-              <div
-                className={`collapsible-grid${themeSettingsCollapsed ? " is-collapsed" : ""}`}
-                aria-hidden={themeSettingsCollapsed}
-              >
-                <div className="collapsible-grid-inner theme-settings-stack">
-                  <RangeField
-                    label="Surface depth"
-                    min={-50}
-                    max={200}
-                    step={1}
-                    value={themeSettings.surfaceDepth}
-                    display={`${themeSettings.surfaceDepth}%`}
-                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceDepth}
-                    onChange={(value) =>
-                      setThemeSettings((current) => ({ ...current, surfaceDepth: value }))
-                    }
-                  />
-                  <RangeField
-                    label="Surface contrast"
-                    min={-200}
-                    max={200}
-                    step={1}
-                    value={themeSettings.surfaceContrast}
-                    display={fmt(themeSettings.surfaceContrast)}
-                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceContrast}
-                    onChange={(value) =>
-                      setThemeSettings((current) => ({ ...current, surfaceContrast: value }))
-                    }
-                  />
-                  <RangeField
-                    label="Color depth"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={themeSettings.chromaticDepth}
-                    display={`${themeSettings.chromaticDepth}%`}
-                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaticDepth}
-                    onChange={(value) =>
-                      setThemeSettings((current) => ({ ...current, chromaticDepth: value }))
-                    }
-                  />
-                  <RangeField
-                    label="Chroma preserve"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={themeSettings.chromaPreservation}
-                    display={`${themeSettings.chromaPreservation}%`}
-                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaPreservation}
-                    onChange={(value) =>
-                      setThemeSettings((current) => ({ ...current, chromaPreservation: value }))
-                    }
-                  />
-                  <RangeField
-                    label="Text depth"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={themeSettings.textDepth}
-                    display={`${themeSettings.textDepth}%`}
-                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.textDepth}
-                    onChange={(value) =>
-                      setThemeSettings((current) => ({ ...current, textDepth: value }))
-                    }
-                  />
-                  <RangeField
-                    label="Text contrast"
-                    min={0}
-                    max={90}
-                    step={1}
-                    value={themeSettings.textMinContrast}
-                    display={`${themeSettings.textMinContrast}`}
-                    resetValue={DEFAULT_THEME_FLIP_SETTINGS.textMinContrast}
-                    onChange={(value) =>
-                      setThemeSettings((current) => ({ ...current, textMinContrast: value }))
-                    }
-                  />
-                  <div className="theme-settings-options">
-                    <ToggleCheck
-                      label="Preserve color foreground"
-                      checked={themeSettings.preserveColorForeground}
-                      onChange={(value) =>
-                        setThemeSettings((current) => ({
-                          ...current,
-                          preserveColorForeground: value,
-                        }))
-                      }
-                    />
-                  </div>
+                  {chromaticGroups.length > 0 ? (
+                    <div className="button-row hue-add-row">
+                      {chromaticGroups.map((group) => {
+                        const isAdded = addedExtraGroupScopeIds.has(group.id);
+                        return (
+                          <button
+                            key={`add-${group.id}`}
+                            className={`hue-add-btn${isAdded ? " is-added" : ""}`}
+                            disabled={isAdded}
+                            onClick={() => handleAddExtraHueGroup(group.id)}
+                          >
+                            {isAdded ? (
+                              group.name
+                            ) : (
+                              <>
+                                <span className="btn-icon hue-add-icon">
+                                  <IconPlus />
+                                </span>
+                                <span>{group.name}</span>
+                              </>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="muted">No chromatic color groups detected on this page yet.</p>
+                  )}
                 </div>
               </div>
-            </div>
-          </Section>}
+            </Section>
 
-          <div className="footer">
-            <span className="footer-status">{status}</span>
-            <button
-              className={`btn-ghost icon-btn${themeFlipEnabled ? " is-active" : ""}`}
-              onClick={() => setThemeFlipEnabled((current) => !current)}
-              title={themeFlipEnabled ? `Back to ${sourceTheme} theme` : `Switch to ${targetTheme} theme`}
-              aria-label={themeFlipEnabled ? `Back to ${sourceTheme} theme` : `Switch to ${targetTheme} theme`}
-            >
-              <IconThemeFlip />
-            </button>
-            <button
-              className="btn-ghost icon-btn"
-              onMouseDown={handleCompareStart}
-              onMouseUp={handleCompareEnd}
-              onMouseLeave={handleCompareEnd}
-              title="Hold to compare"
-              aria-label="Hold to compare"
-            >
-              <IconCompareArrows />
-            </button>
-            <button
-              className="btn-ghost icon-btn"
-              onClick={handleReset}
-              title="Reset"
-              aria-label="Reset"
-            >
-              <IconReset />
-            </button>
+            {themeFlipEnabled && <Section>
+              <CollapsibleCard
+                className={`hue-group-card theme-settings-card${!themeSettingsCollapsed ? " is-open" : ""}`}
+                title="Invert colors"
+                collapsed={themeSettingsCollapsed}
+                onToggle={() => setThemeSettingsCollapsed((value) => !value)}
+                chevronLabel={{
+                  expand: "Expand invert colors",
+                  collapse: "Collapse invert colors",
+                }}
+                contentClassName="theme-settings-stack"
+              >
+                <RangeField
+                  label="Surface depth"
+                  min={-50}
+                  max={200}
+                  step={1}
+                  value={themeSettings.surfaceDepth}
+                  display={`${themeSettings.surfaceDepth}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceDepth}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, surfaceDepth: value }))
+                  }
+                />
+                <RangeField
+                  label="Surface contrast"
+                  min={-200}
+                  max={200}
+                  step={1}
+                  value={themeSettings.surfaceContrast}
+                  display={fmt(themeSettings.surfaceContrast)}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceContrast}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, surfaceContrast: value }))
+                  }
+                />
+                <RangeField
+                  label="Color depth"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.chromaticDepth}
+                  display={`${themeSettings.chromaticDepth}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaticDepth}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, chromaticDepth: value }))
+                  }
+                />
+                <RangeField
+                  label="Chroma preserve"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.chromaPreservation}
+                  display={`${themeSettings.chromaPreservation}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaPreservation}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, chromaPreservation: value }))
+                  }
+                />
+                <RangeField
+                  label="Text depth"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.textDepth}
+                  display={`${themeSettings.textDepth}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textDepth}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, textDepth: value }))
+                  }
+                />
+                <RangeField
+                  label="Text contrast"
+                  min={0}
+                  max={90}
+                  step={1}
+                  value={themeSettings.textMinContrast}
+                  display={`${themeSettings.textMinContrast}`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textMinContrast}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, textMinContrast: value }))
+                  }
+                />
+                <div className="theme-settings-options">
+                  <ToggleCheck
+                    label="Preserve color foreground"
+                    checked={themeSettings.preserveColorForeground}
+                    onChange={(value) =>
+                      setThemeSettings((current) => ({
+                        ...current,
+                        preserveColorForeground: value,
+                      }))
+                    }
+                  />
+                </div>
+              </CollapsibleCard>
+            </Section>}
+
+            <div className="footer">
+              <span className="footer-status">{status}</span>
+              <button
+                className={`btn-ghost icon-btn${themeFlipEnabled ? " is-active" : ""}`}
+                onClick={() => setThemeFlipEnabled((current) => !current)}
+                title={themeFlipEnabled ? `Back to ${sourceTheme} theme` : `Switch to ${targetTheme} theme`}
+                aria-label={themeFlipEnabled ? `Back to ${sourceTheme} theme` : `Switch to ${targetTheme} theme`}
+              >
+                <IconThemeFlip />
+              </button>
+              <button
+                className="btn-ghost icon-btn"
+                onMouseDown={handleCompareStart}
+                onMouseUp={handleCompareEnd}
+                onMouseLeave={handleCompareEnd}
+                title="Hold to compare"
+                aria-label="Hold to compare"
+              >
+                <IconCompareArrows />
+              </button>
+              <button
+                className="btn-ghost icon-btn"
+                onClick={handleReset}
+                title="Reset"
+                aria-label="Reset"
+              >
+                <IconReset />
+              </button>
+            </div>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HeaderTitle({ children }: { children: ReactNode }) {
+  return (
+    <div className="hue-group-copy">
+      <strong>{children}</strong>
+    </div>
+  );
+}
+
+function CardHeader({
+  title,
+  actions,
+  collapsed,
+  onToggle,
+  onHeaderClick,
+  chevronLabel,
+}: {
+  title: ReactNode;
+  actions?: ReactNode;
+  collapsed?: boolean;
+  onToggle?: () => void;
+  onHeaderClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
+  chevronLabel?: {
+    expand: string;
+    collapse: string;
+  };
+}) {
+  const headerClassName = [
+    "hue-group-header",
+    onToggle ? "" : "is-static",
+    actions ? "" : "no-actions",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className={headerClassName} onClick={onHeaderClick}>
+      {onToggle ? (
+        <button
+          className="group-toggle"
+          type="button"
+          onClick={onToggle}
+          aria-expanded={collapsed === undefined ? undefined : !collapsed}
+        >
+          <HeaderTitle>{title}</HeaderTitle>
+        </button>
+      ) : (
+        <div className="group-toggle group-toggle-static">
+          <HeaderTitle>{title}</HeaderTitle>
         </div>
       )}
-
+      {actions ? <div className="hue-group-actions">{actions}</div> : null}
+      {onToggle ? (
+        <button
+          className="group-chevron-btn icon-btn"
+          type="button"
+          onClick={onToggle}
+          aria-label={
+            chevronLabel
+              ? collapsed
+                ? chevronLabel.expand
+                : chevronLabel.collapse
+              : undefined
+          }
+          aria-expanded={collapsed === undefined ? undefined : !collapsed}
+        >
+          <span className={`group-chevron${collapsed ? " is-collapsed" : ""}`}>
+            <IconChevronDown />
+          </span>
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+function CollapsibleCard({
+  className,
+  style,
+  title,
+  actions,
+  collapsed,
+  onToggle,
+  chevronLabel,
+  contentClassName,
+  children,
+}: {
+  className: string;
+  style?: CSSProperties;
+  title: ReactNode;
+  actions?: ReactNode;
+  collapsed: boolean;
+  onToggle: () => void;
+  chevronLabel: {
+    expand: string;
+    collapse: string;
+  };
+  contentClassName?: string;
+  children: ReactNode;
+}) {
+  const handleCardClick = collapsed
+    ? (event: React.MouseEvent<HTMLDivElement>) => {
+        if (!isButtonTarget(event.target)) {
+          onToggle();
+        }
+      }
+    : undefined;
+  const handleHeaderClick = !collapsed
+    ? (event: React.MouseEvent<HTMLDivElement>) => {
+        if (!isButtonTarget(event.target)) {
+          onToggle();
+        }
+      }
+    : undefined;
+
+  return (
+    <div className={className} style={style} onClick={handleCardClick}>
+      <div className="collapsible-card-header-shell">
+        <CardHeader
+          title={title}
+          actions={actions}
+          collapsed={collapsed}
+          onToggle={onToggle}
+          onHeaderClick={handleHeaderClick}
+          chevronLabel={chevronLabel}
+        />
+      </div>
+      <div className={`collapsible-grid${collapsed ? " is-collapsed" : ""}`} aria-hidden={collapsed}>
+        <div className="collapsible-grid-inner">
+          <div className={`collapsible-grid-content${contentClassName ? ` ${contentClassName}` : ""}`}>
+            {children}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
