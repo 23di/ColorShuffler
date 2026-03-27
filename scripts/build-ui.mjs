@@ -4,19 +4,22 @@
  * Uses esbuild to bundle React/TS, then inlines JS + CSS into one HTML file.
  */
 import { build } from "esbuild";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
+const distDir = resolve(root, "dist");
+
+rmSync(distDir, { recursive: true, force: true });
 
 // 1. Bundle the UI TypeScript/React into a single IIFE JS string
 const result = await build({
   entryPoints: [resolve(root, "src/ui/main.tsx")],
   bundle: true,
   write: false,          // don't write to disk — we'll inline it
-  outdir: resolve(root, "dist"),  // required for CSS splitting
+  outdir: distDir,  // required for CSS splitting
   format: "iife",
   target: "es6",
   platform: "browser",
@@ -59,8 +62,8 @@ const html = `<!DOCTYPE html>
 </html>`;
 
 // 4. Write to dist/
-mkdirSync(resolve(root, "dist"), { recursive: true });
-writeFileSync(resolve(root, "dist/index.html"), html, "utf8");
+mkdirSync(distDir, { recursive: true });
+writeFileSync(resolve(distDir, "index.html"), html, "utf8");
 
 console.log(
   `[build-ui] OK — ${(Buffer.byteLength(html) / 1024).toFixed(1)} kB`
