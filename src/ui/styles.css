@@ -138,6 +138,20 @@ body,
   gap: 10px;
   justify-content: flex-end;
 }
+.global-harmony-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 2px 0 0;
+}
+.global-harmony-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
+}
 .range-field {
   display: flex;
   flex-direction: column;
@@ -367,9 +381,6 @@ body,
   flex-direction: column;
   gap: 10px;
 }
-.main-controls-disabled {
-  opacity: 0.5;
-}
 .hue-group-count {
   color: var(--text-2);
   font-weight: 500;
@@ -412,6 +423,109 @@ body,
 .hue-add-btn.is-added {
   color: var(--text-2);
 }
+.hue-wheel-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hue-wheel {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  align-self: center;
+  cursor: default;
+  touch-action: none;
+}
+.hue-wheel-disc,
+.hue-wheel-ring,
+.hue-wheel-neutral-orbit,
+.hue-wheel-overlay {
+  position: absolute;
+  inset: 0;
+}
+.hue-wheel-disc {
+  border-radius: 50%;
+  border: 0;
+  box-shadow: none;
+  opacity: 1;
+  cursor: grab;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.hue-wheel.is-master-dragging .hue-wheel-disc {
+  cursor: grabbing;
+}
+.hue-wheel-ring {
+  border-radius: 50%;
+  pointer-events: none;
+}
+.hue-wheel-overlay {
+  pointer-events: none;
+  overflow: visible;
+}
+.hue-wheel-neutral-orbit {
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, var(--text) 18%, transparent);
+  pointer-events: none;
+}
+.hue-wheel-node,
+.hue-wheel-neutral {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  cursor: grab;
+  border: 2px solid rgba(255, 255, 255, 0.94);
+  background: var(--node-accent, color-mix(in srgb, white 18%, var(--bg-2)));
+  box-shadow: none;
+  transition:
+    transform var(--transition-fast),
+    border-color var(--transition-base);
+}
+.hue-wheel-node {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.hue-wheel-node:hover,
+.hue-wheel-neutral:hover {
+  transform: translate(-50%, -50%) scale(1.06);
+  border-color: rgba(255, 255, 255, 1);
+}
+.hue-wheel-node.is-active,
+.hue-wheel-neutral.is-active {
+  transform: translate(-50%, -50%) scale(1.08);
+  border-color: rgba(255, 255, 255, 1);
+}
+.hue-wheel-node.is-dragging,
+.hue-wheel-neutral.is-dragging,
+.hue-wheel-node:active,
+.hue-wheel-neutral:active {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.08);
+  border-color: rgba(255, 255, 255, 1);
+}
+.hue-wheel-node-group {
+  width: 18px;
+  height: 18px;
+}
+.hue-wheel-node-group.is-passive {
+  opacity: 1;
+}
+.hue-wheel-node-group.is-separated {
+  z-index: 2;
+}
+.hue-wheel-neutral {
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
 .range-head {
   display: flex;
   justify-content: space-between;
@@ -436,7 +550,7 @@ body,
   width: 100%;
   height: 8px;
   border-radius: 999px;
-  background: var(--bg-3);
+  background: var(--range-track-background, var(--bg-3));
   outline: none;
   cursor: pointer;
 }
@@ -448,29 +562,14 @@ body,
   opacity: 0.45;
 }
 .range-field input[type="range"].is-hue {
-  background: linear-gradient(
-    to right,
-    #0af5f5,
-    #238cf6,
-    #4545f7,
-    #993bf7,
-    #f631f6,
-    #f63194,
-    #f63131,
-    #f69431,
-    #f6f631,
-    #80f50a,
-    #0aeb0a,
-    #0af580,
-    #0af5f5
-  );
+  background: var(--range-track-background, var(--bg-3));
 }
 .range-field input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--text);
+  background: var(--range-thumb-color, var(--text));
   border: 2px solid var(--bg);
   box-shadow: 0 0 0 1px var(--border);
   cursor: pointer;
@@ -581,6 +680,11 @@ body,
 }
 .select-field select:focus {
   border-color: var(--accent);
+}
+.select-field select:disabled,
+.select-field.is-unstyled select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .button-row {
   display: flex;
@@ -728,7 +832,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: var(--card-gap);
-  padding: var(--card-gap) var(--card-pad-x) var(--collapsible-safe-bottom);
+  padding: var(--card-gap) var(--card-pad-x) calc(var(--card-pad-y) + 2px);
 }
 .theme-settings-options {
   display: flex;
