@@ -222,7 +222,6 @@ function isShadowEffect(effect: Effect): effect is DropShadowEffect | InnerShado
 function paintVisible(paint: Paint): boolean {
   return paint.visible !== false && (paint.opacity ?? 1) > 0;
 }
-
 function sourceKindFor(
   node: SceneNode,
   property: PaintProperty,
@@ -902,7 +901,8 @@ function applyGradientPaint(
 ): Paint {
   if (!isGradientPaint(paint)) return paint;
   const deltaL = mapping.targetOklch.l - averageOklch.l;
-  const deltaC = mapping.targetOklch.c - averageOklch.c;
+  const chromaScale =
+    averageOklch.c > 0.0001 ? mapping.targetOklch.c / averageOklch.c : 0;
   const deltaH = shortestHueDelta(averageOklch.h, mapping.targetOklch.h);
 
   return {
@@ -911,7 +911,9 @@ function applyGradientPaint(
       const source = rgbToOklch(figmaColorToSerialized(stop.color, stop.color.a));
       const adjusted = {
         l: Math.max(0, Math.min(1, source.l + deltaL)),
-        c: Math.max(0, source.c + deltaC),
+        // Scale chroma proportionally so a zero-chroma target really desaturates
+        // every stop instead of only shifting them toward the average color.
+        c: Math.max(0, source.c * chromaScale),
         h: source.h + deltaH,
         alpha: source.alpha,
       } satisfies OklchColor;

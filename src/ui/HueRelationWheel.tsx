@@ -21,15 +21,16 @@ export type HueRelationWheelNode = {
 
 type DragTarget =
   | { kind: "master"; id: string }
-  | { kind: "group"; id: string }
-  | { kind: "neutral"; id: string };
+  | { kind: "group"; id: string; forceIndependent?: boolean }
+  | { kind: "neutral"; id: string; forceIndependent?: boolean };
 
 const WHEEL_SIZE = 220;
 const WHEEL_CENTER = WHEEL_SIZE / 2;
+const GROUP_NODE_SIZE = 18;
 const MIN_GROUP_RADIUS = 36;
-const MAX_GROUP_RADIUS = 90;
 const RADIUS_STEP = 4;
 const NEUTRAL_RING_RADIUS = 32;
+const MAX_GROUP_RADIUS = WHEEL_CENTER - GROUP_NODE_SIZE / 2 - 1;
 
 function normalizeHue(hue: number): number {
   return ((hue % 360) + 360) % 360;
@@ -63,6 +64,19 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function spokeStyle(hue: number, radius: number): CSSProperties {
+  return {
+    left: `${WHEEL_CENTER}px`,
+    top: `${WHEEL_CENTER - radius}px`,
+    height: `${radius}px`,
+    transform: `translateX(-50%) rotate(${normalizeHue(hue)}deg)`,
+  };
+}
+
 export function HueRelationWheel({
   nodes,
   activeId,
@@ -72,19 +86,25 @@ export function HueRelationWheel({
   onGroupActivate,
   onGroupUnlink,
   onNeutralChange,
+  onNeutralDoubleClick,
 }: {
   nodes: HueRelationWheelNode[];
   activeId: string | null;
   onActiveChange?: (id: string | null) => void;
   onMasterHueChange: (nextHue: number) => void;
-  onGroupHueChange: (groupId: string, nextHue: number) => void;
+  onGroupHueChange: (groupId: string, nextHue: number, forceIndependent?: boolean) => void;
   onGroupActivate: (groupId: string) => void;
   onGroupUnlink: (groupId: string) => void;
-  onNeutralChange: (nextHue: number, tintStrength: number) => void;
+  onNeutralChange: (nextHue: number, tintStrength: number, forceIndependent?: boolean) => void;
+  onNeutralDoubleClick: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const discCanvasRef = useRef<HTMLCanvasElement>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragMovedRef = useRef(false);
+  const lastTapRef = useRef<{ kind: "group" | "neutral"; id: string; at: number } | null>(null);
+  const suppressNextNeutralDoubleClickRef = useRef(false);
 
   const neutralNode = nodes.find((node) => node.kind === "neutral-center") ?? null;
   const groupNodes = useMemo(
@@ -111,9 +131,26 @@ export function HueRelationWheel({
     return next;
   }, [groupNodes]);
 
+  const resolveGroupRadius = (node: HueRelationWheelNode & { kind: "group"; displayHue: number }) => {
+    const chromaWeight = clamp01(node.radialWeight ?? 0);
+    const baseRadius =
+      MIN_GROUP_RADIUS + chromaWeight * (MAX_GROUP_RADIUS - MIN_GROUP_RADIUS);
+    return clamp(
+      baseRadius + (placementById.get(node.id) ?? 0),
+      MIN_GROUP_RADIUS,
+      MAX_GROUP_RADIUS,
+    );
+  };
+
   useEffect(() => {
     const canvas = discCanvasRef.current;
     if (!canvas) return;
+
+    const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
+    const renderScale = Math.min(devicePixelRatio, 2);
+    const renderSize = Math.round(WHEEL_SIZE * renderScale);
+    canvas.width = renderSize;
+    canvas.height = renderSize;
 
     const context = canvas.getContext("2d");
     if (!context) return;
@@ -156,15 +193,17 @@ export function HueRelationWheel({
         data[pixelIndex] = pixel[0];
         data[pixelIndex + 1] = pixel[1];
         data[pixelIndex + 2] = pixel[2];
-        data[pixelIndex + 3] = 255;
+        const edgeFeather = Math.max(1, renderScale * 1.25);
+        const edgeAlpha = clamp((radius - distance) / edgeFeather, 0, 1);
+        data[pixelIndex + 3] = Math.round(edgeAlpha * 255);
       }
     }
 
     context.putImageData(image, 0, 0);
     context.beginPath();
-    context.arc(centerX, centerY, radius - 0.5, 0, Math.PI * 2);
+    context.arc(centerX, centerY, radius - renderScale / 2, 0, Math.PI * 2);
     context.strokeStyle = "rgba(255,255,255,0.15)";
-    context.lineWidth = 1;
+    context.lineWidth = renderScale;
     context.stroke();
   }, []);
 
@@ -174,6 +213,12 @@ export function HueRelationWheel({
     const onPointerMove = (event: PointerEvent) => {
       const container = containerRef.current;
       if (!container) return;
+      const pointerStart = pointerStartRef.current;
+      if (pointerStart && !dragMovedRef.current) {
+        if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 4) {
+          dragMovedRef.current = true;
+        }
+      }
       if (dragTarget.kind === "master") {
         const nextHue = hueFromPointer(container, event);
         onMasterHueChange(nextHue);
@@ -185,14 +230,30 @@ export function HueRelationWheel({
         const y = event.clientY - rect.top - rect.height / 2;
         const nextHue = normalizeHue((Math.atan2(y, x) * 180) / Math.PI + 90);
         const tintStrength = clamp01(Math.hypot(x, y) / NEUTRAL_RING_RADIUS);
-        onNeutralChange(nextHue, tintStrength);
+        onNeutralChange(nextHue, tintStrength, dragTarget.forceIndependent);
         return;
       }
       const nextHue = hueFromPointer(container, event);
-      onGroupHueChange(dragTarget.id, nextHue);
+      onGroupHueChange(dragTarget.id, nextHue, dragTarget.forceIndependent);
     };
 
     const onPointerUp = () => {
+      if (
+        dragTarget.kind === "neutral" &&
+        dragTarget.forceIndependent &&
+        dragMovedRef.current
+      ) {
+        suppressNextNeutralDoubleClickRef.current = true;
+      }
+      if ((dragTarget.kind === "group" || dragTarget.kind === "neutral") && !dragMovedRef.current) {
+        lastTapRef.current = {
+          kind: dragTarget.kind,
+          id: dragTarget.id,
+          at: Date.now(),
+        };
+      }
+      pointerStartRef.current = null;
+      dragMovedRef.current = false;
       setDragTarget(null);
     };
 
@@ -210,6 +271,11 @@ export function HueRelationWheel({
     target: DragTarget,
   ) => {
     event.preventDefault();
+    pointerStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+    };
+    dragMovedRef.current = false;
     setDragTarget(target);
     onActiveChange?.(target.id);
   };
@@ -244,12 +310,30 @@ export function HueRelationWheel({
           }}
           aria-hidden="true"
         />
+        <div className="hue-wheel-overlay" aria-hidden="true">
+          {groupNodes.map((node) => {
+            const radius = resolveGroupRadius(node);
+            return (
+              <div
+                key={`spoke-${node.id}`}
+                className={`hue-wheel-spoke${activeId === node.id ? " is-active" : ""}`}
+                style={spokeStyle(node.displayHue, radius)}
+              />
+            );
+          })}
+          {neutralNode && (neutralNode.neutralTintStrength ?? 0) > 0.001 ? (() => {
+            const radius = (neutralNode.neutralTintStrength ?? 0) * NEUTRAL_RING_RADIUS;
+            return (
+              <div
+                className={`hue-wheel-spoke hue-wheel-spoke-neutral${activeId === neutralNode.id ? " is-active" : ""}`}
+                style={spokeStyle(neutralNode.displayHue ?? 0, radius)}
+              />
+            );
+          })() : null}
+        </div>
 
         {groupNodes.map((node) => {
-          const chromaWeight = clamp01(node.radialWeight ?? 0);
-          const baseRadius =
-            MIN_GROUP_RADIUS + chromaWeight * (MAX_GROUP_RADIUS - MIN_GROUP_RADIUS);
-          const radius = baseRadius + (placementById.get(node.id) ?? 0);
+          const radius = resolveGroupRadius(node);
           const position = angleToCartesian(node.displayHue, radius);
           const style = {
             left: `${position.x}px`,
@@ -293,7 +377,20 @@ export function HueRelationWheel({
               onDoubleClick={() => onGroupUnlink(node.id)}
               onPointerDown={(event) => {
                 if (node.isInteractive) {
-                  startDrag(event, { kind: "group", id: node.id });
+                  const recentTap = lastTapRef.current;
+                  const forceIndependent =
+                    node.isLinked &&
+                    recentTap?.kind === "group" &&
+                    recentTap?.id === node.id &&
+                    Date.now() - recentTap.at < 380;
+                  if (forceIndependent) {
+                    lastTapRef.current = null;
+                  }
+                  startDrag(event, {
+                    kind: "group",
+                    id: node.id,
+                    forceIndependent,
+                  });
                 }
               }}
             />
@@ -320,7 +417,28 @@ export function HueRelationWheel({
               aria-label="Neutrals: drag to tint neutral colors"
               title="Neutrals: drag to tint neutral colors"
               onMouseEnter={() => onActiveChange?.(neutralNode.id)}
-              onPointerDown={(event) => startDrag(event, { kind: "neutral", id: neutralNode.id })}
+              onDoubleClick={() => {
+                if (suppressNextNeutralDoubleClickRef.current) {
+                  suppressNextNeutralDoubleClickRef.current = false;
+                  return;
+                }
+                onNeutralDoubleClick();
+              }}
+              onPointerDown={(event) => {
+                const recentTap = lastTapRef.current;
+                const forceIndependent =
+                  recentTap?.kind === "neutral" &&
+                  recentTap.id === neutralNode.id &&
+                  Date.now() - recentTap.at < 380;
+                if (forceIndependent) {
+                  lastTapRef.current = null;
+                }
+                startDrag(event, {
+                  kind: "neutral",
+                  id: neutralNode.id,
+                  forceIndependent,
+                });
+              }}
             />
           );
         })() : null}
