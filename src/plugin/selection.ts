@@ -240,13 +240,27 @@ function aggregateContextFor(sourceKind: SourceKind): "text" | "paint" {
   return sourceKind === "text" || sourceKind === "gradient-text" ? "text" : "paint";
 }
 
+// Split text usages that sit on a chromatic background into their own
+// aggregate bucket. This lets "#FFF on blue button" and "#FFF on dark body"
+// map to different targets during a theme flip, instead of being yoked to
+// a single global mapping for the color.
+const TEXT_ACCENT_CONTEXT = "text_accent" as const;
+const CHROMATIC_BG_THRESHOLD = 0.05;
+
+function isChromaticBackground(bg: SerializedColor | null | undefined): boolean {
+  if (!bg) return false;
+  return rgbToOklch(bg).c > CHROMATIC_BG_THRESHOLD;
+}
+
 function recordColor(
   aggregates: Map<string, ColorAggregate>,
   nodeId: string,
   sourceKind: SourceKind,
   rgb: SerializedColor,
+  contextOverride?: string,
 ): string {
-  const key = `${buildColorKey(rgb)}__${aggregateContextFor(sourceKind)}`;
+  const context = contextOverride ?? aggregateContextFor(sourceKind);
+  const key = `${buildColorKey(rgb)}__${context}`;
   const existing = aggregates.get(key);
   if (!existing) {
     aggregates.set(key, {
@@ -530,13 +544,16 @@ function inspectPaintArray(
 
     if (isSolidPaint(paint)) {
       const rgb = figmaColorToSerialized(paint.color, paint.opacity ?? 1);
+      const isText = node.type === "TEXT" && property === "fills";
+      const textOnChromatic = isText && isChromaticBackground(textBackground);
       const sourceKey = recordColor(
         aggregates,
         node.id,
         sourceKindFor(node, property, false),
         rgb,
+        textOnChromatic ? TEXT_ACCENT_CONTEXT : undefined,
       );
-      if (textContexts && node.type === "TEXT" && property === "fills") {
+      if (textContexts && isText) {
         const backgroundColor = textBackground ?? { r: 1, g: 1, b: 1, a: 1 };
         recordSurfaceContext(textContexts, sourceKey, rgb, backgroundColor);
       }
@@ -558,13 +575,16 @@ function inspectPaintArray(
 
     if (isGradientPaint(paint)) {
       const average = averageGradientPaint(paint);
+      const isText = node.type === "TEXT" && property === "fills";
+      const textOnChromatic = isText && isChromaticBackground(textBackground);
       const sourceKey = recordColor(
         aggregates,
         node.id,
         sourceKindFor(node, property, true),
         average,
+        textOnChromatic ? TEXT_ACCENT_CONTEXT : undefined,
       );
-      if (textContexts && node.type === "TEXT" && property === "fills") {
+      if (textContexts && isText) {
         const backgroundColor = textBackground ?? { r: 1, g: 1, b: 1, a: 1 };
         recordSurfaceContext(textContexts, sourceKey, average, backgroundColor);
       }
@@ -606,9 +626,12 @@ function inspectTextSegments(
     }
     if (!paint) continue;
 
+    const textOnChromatic = isChromaticBackground(background);
+    const contextOverride = textOnChromatic ? TEXT_ACCENT_CONTEXT : undefined;
+
     if (isSolidPaint(paint)) {
       const rgb = figmaColorToSerialized(paint.color, paint.opacity ?? 1);
-      const sourceKey = recordColor(aggregates, node.id, "text", rgb);
+      const sourceKey = recordColor(aggregates, node.id, "text", rgb, contextOverride);
       const backgroundColor = background ?? { r: 1, g: 1, b: 1, a: 1 };
       recordSurfaceContext(textContexts, sourceKey, rgb, backgroundColor);
       bindings.push({
@@ -623,7 +646,7 @@ function inspectTextSegments(
 
     if (isGradientPaint(paint)) {
       const average = averageGradientPaint(paint);
-      const sourceKey = recordColor(aggregates, node.id, "gradient-text", average);
+      const sourceKey = recordColor(aggregates, node.id, "gradient-text", average, contextOverride);
       const backgroundColor = background ?? { r: 1, g: 1, b: 1, a: 1 };
       recordSurfaceContext(textContexts, sourceKey, average, backgroundColor);
       bindings.push({
@@ -686,13 +709,18 @@ function buildSummary(
         const textContext = textContexts.get(color.key);
         const foregroundContext = foregroundContexts.get(color.key);
         const preferredContext = textContext ?? foregroundContext;
+        const CHROMATIC_BG_THRESHOLD = 0.05;
         let dominantBackground: { rgb: SerializedColor; count: number } | null = null;
+        let hasChromaticTextBackground = false;
         if (preferredContext) {
           for (const entry of preferredContext.backgroundCounts.values()) {
             const entryContrast = Math.abs(calculateApcaContrast(color.rgb, entry.rgb));
             const dominantContrast = dominantBackground
               ? Math.abs(calculateApcaContrast(color.rgb, dominantBackground.rgb))
               : -1;
+            if (rgbToOklch(entry.rgb).c > CHROMATIC_BG_THRESHOLD) {
+              hasChromaticTextBackground = true;
+            }
             if (
               !dominantBackground ||
               entryContrast > dominantContrast + 0.5 ||
@@ -713,6 +741,7 @@ function buildSummary(
               textPriority: resolveTextPriority(resolvedContrast ?? 0),
               textBackground: dominantBackground?.rgb,
               textBackgroundHex: dominantBackground ? rgbToHex(dominantBackground.rgb) : undefined,
+              hasChromaticTextBackground,
             }
           : {};
         const textOnly = color.sourceKinds.every(

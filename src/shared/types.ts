@@ -84,6 +84,8 @@ export interface ThemeColorContext {
   textPriority?: ThemeTextPriority;
   textBackground?: SerializedColor;
   textBackgroundHex?: string;
+  /** True if the text color was observed at least once on a chromatic (c > 0.05) background. */
+  hasChromaticTextBackground?: boolean;
 }
 
 export interface ThemeDetectionSummary {
@@ -92,13 +94,26 @@ export interface ThemeDetectionSummary {
 }
 
 export interface ThemeFlipSettings {
-  surfaceDepth: number;
-  surfaceContrast: number;
-  chromaticDepth: number;
-  chromaPreservation: number;
-  textDepth: number;
-  textMinContrast: number;
-  preserveColorForeground: boolean;
+  /** 0..100 — how close the main background goes to the pure pole (#FFF / #000). */
+  backgroundBrightness: number;
+  /** 0..100 — contrast between surface tiers (base / raised / overlay / border). */
+  surfaceSeparation: number;
+  /** 0..150 — chroma scale for chromatic roles. 0 = grayscale, 100 = source, 150 = boost. */
+  accentSaturation: number;
+  /** -50..+50 — lightness shift for chromatic/accent roles (independent of neutrals). */
+  accentBrightness: number;
+  /** 30..95 — APCA min |Lc| target for primary body text. */
+  textContrast: number;
+  /** 0..100 — how far past the APCA threshold text is pulled toward the extreme pole. */
+  textWeight: number;
+  /**
+   * When true, near-pole text (pure white / pure black) that was ever observed
+   * on a chromatic background (e.g. button labels, badge text) keeps its source
+   * lightness even if elsewhere the same color lives on a neutral surface.
+   * Tradeoff: if the same #FFF is shared between a button label AND a body
+   * title, the title will also stay white after flipping to light.
+   */
+  preserveButtonText: boolean;
 }
 
 export interface ExploreBandAdjustment {

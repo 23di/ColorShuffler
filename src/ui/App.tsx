@@ -1704,9 +1704,22 @@ function App() {
   const themedDemoEntries = useMemo(
     () =>
       themeFlipEnabled
-        ? applyThemeFlip(demoEntries, analysisColorByKey, themeSettings, targetTheme)
+        ? applyThemeFlip(
+            demoEntries,
+            analysisColorByKey,
+            themeSettings,
+            targetTheme,
+            deferredAnalysis?.themeDetection,
+          )
         : demoEntries,
-    [analysisColorByKey, demoEntries, targetTheme, themeFlipEnabled, themeSettings],
+    [
+      analysisColorByKey,
+      deferredAnalysis?.themeDetection,
+      demoEntries,
+      targetTheme,
+      themeFlipEnabled,
+      themeSettings,
+    ],
   );
 
   useEffect(() => {
@@ -2731,85 +2744,85 @@ function App() {
                 contentClassName="theme-settings-stack"
               >
                 <RangeField
-                  label="Surface depth"
+                  label="Background brightness"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.backgroundBrightness}
+                  display={`${themeSettings.backgroundBrightness}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.backgroundBrightness}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, backgroundBrightness: value }))
+                  }
+                />
+                <RangeField
+                  label="Surface separation"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.surfaceSeparation}
+                  display={`${themeSettings.surfaceSeparation}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceSeparation}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, surfaceSeparation: value }))
+                  }
+                />
+                <RangeField
+                  label="Accent saturation"
+                  min={0}
+                  max={150}
+                  step={1}
+                  value={themeSettings.accentSaturation}
+                  display={`${themeSettings.accentSaturation}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.accentSaturation}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, accentSaturation: value }))
+                  }
+                />
+                <RangeField
+                  label="Accent brightness"
                   min={-50}
-                  max={200}
+                  max={50}
                   step={1}
-                  value={themeSettings.surfaceDepth}
-                  display={`${themeSettings.surfaceDepth}%`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceDepth}
+                  value={themeSettings.accentBrightness}
+                  display={fmt(themeSettings.accentBrightness)}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.accentBrightness}
                   onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, surfaceDepth: value }))
-                  }
-                />
-                <RangeField
-                  label="Surface contrast"
-                  min={-200}
-                  max={200}
-                  step={1}
-                  value={themeSettings.surfaceContrast}
-                  display={fmt(themeSettings.surfaceContrast)}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.surfaceContrast}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, surfaceContrast: value }))
-                  }
-                />
-                <RangeField
-                  label="Color depth"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={themeSettings.chromaticDepth}
-                  display={`${themeSettings.chromaticDepth}%`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaticDepth}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, chromaticDepth: value }))
-                  }
-                />
-                <RangeField
-                  label="Chroma preserve"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={themeSettings.chromaPreservation}
-                  display={`${themeSettings.chromaPreservation}%`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.chromaPreservation}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, chromaPreservation: value }))
-                  }
-                />
-                <RangeField
-                  label="Text depth"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={themeSettings.textDepth}
-                  display={`${themeSettings.textDepth}%`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textDepth}
-                  onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, textDepth: value }))
+                    setThemeSettings((current) => ({ ...current, accentBrightness: value }))
                   }
                 />
                 <RangeField
                   label="Text contrast"
-                  min={0}
-                  max={90}
+                  min={30}
+                  max={95}
                   step={1}
-                  value={themeSettings.textMinContrast}
-                  display={`${themeSettings.textMinContrast}`}
-                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textMinContrast}
+                  value={themeSettings.textContrast}
+                  display={`${themeSettings.textContrast}`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textContrast}
                   onChange={(value) =>
-                    setThemeSettings((current) => ({ ...current, textMinContrast: value }))
+                    setThemeSettings((current) => ({ ...current, textContrast: value }))
+                  }
+                />
+                <RangeField
+                  label="Text weight"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.textWeight}
+                  display={`${themeSettings.textWeight}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.textWeight}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, textWeight: value }))
                   }
                 />
                 <div className="theme-settings-options">
                   <ToggleCheck
-                    label="Preserve color foreground"
-                    checked={themeSettings.preserveColorForeground}
+                    label="Preserve button text"
+                    checked={themeSettings.preserveButtonText}
                     onChange={(value) =>
                       setThemeSettings((current) => ({
                         ...current,
-                        preserveColorForeground: value,
+                        preserveButtonText: value,
                       }))
                     }
                   />
