@@ -26,7 +26,6 @@ Theme conversion is still experimental and may not produce reliable results for 
 - [TypeScript](https://www.typescriptlang.org/) — application code
 - [Vite](https://vite.dev/) and [esbuild](https://esbuild.github.io/) — build tooling
 
-## More Plugins
 
 You can also try [TinyPics — Fast Local Image Compressor](https://www.figma.com/community/plugin/1612595698368227712/tinypics-fast-local-image-compressor).
 
