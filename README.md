@@ -4,6 +4,8 @@ Figma plugin for exploring and adjusting UI color palettes directly on real desi
 
 Color Shuffler is completely free. Everything runs locally — no analytics, no tracking, and no network access.
 
+[Open in Figma Community](https://www.figma.com/community/plugin/1622294161663649835)
+
 ## Features
 
 - Explore color variations while preserving perceived lightness
@@ -16,16 +18,6 @@ Color Shuffler is completely free. Everything runs locally — no analytics, no 
 
 Theme conversion is still experimental and may not produce reliable results for every design.
 
-## Project Structure
-
-```
-src/plugin/    — Figma plugin runtime, selection analysis, and canvas updates
-src/ui/        — React interface and color controls
-src/shared/    — Shared color models, OKLCH utilities, and theme conversion logic
-scripts/       — Build scripts
-manifest.json  — Figma plugin manifest
-```
-
 ## Tech Stack
 
 - [React](https://react.dev/) — plugin interface
@@ -34,16 +26,11 @@ manifest.json  — Figma plugin manifest
 - [TypeScript](https://www.typescriptlang.org/) — application code
 - [Vite](https://vite.dev/) and [esbuild](https://esbuild.github.io/) — build tooling
 
-## Development
-
-```bash
-npm install
-npm run check
-npm run build
-```
-
-Load the plugin in Figma via `Plugins → Development → Import plugin from manifest…` and select `manifest.json`.
-
 ## More Plugins
 
 You can also try [TinyPics — Fast Local Image Compressor](https://www.figma.com/community/plugin/1612595698368227712/tinypics-fast-local-image-compressor).
+
+## License
+
+This project is licensed under the Creative Commons Attribution-NonCommercial
+4.0 International License (CC BY-NC 4.0). See [LICENSE](LICENSE) for the full license text.
