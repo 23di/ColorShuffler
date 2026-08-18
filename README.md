@@ -1,42 +1,36 @@
 # Color Shuffler
 
-Color Shuffler is a Figma plugin for fast palette exploration on real UI screens. It analyzes the current selection, groups colors by family, lets you shift hue/exposure/chroma in real time, and gives you separate controls for individual color families and neutrals.
+Figma plugin for exploring and adjusting UI color palettes directly on real designs. Shift colors across the OKLCH spectrum while preserving perceived lightness, tune neutrals separately, build more complementary palettes, and experiment with light/dark theme conversion.
 
-## What it does
+Color Shuffler is completely free. Everything runs locally — no analytics, no tracking, and no network access.
 
-- Analyzes fills, strokes, text, gradients, and supported shadow colors in the current selection
-- Applies a global `All colors` control for broad hue and tone exploration
-- Creates `Separate control` cards for individual detected color families
-- Keeps a dedicated `Neutrals` group when a real low-chroma cluster exists
-- Supports live preview, reset to baseline, and direct apply back to the canvas
-- Includes a role-based light/dark theme flip with adjustable parameters
+[Open in Figma Community](https://www.figma.com/community/plugin/1622294161663649835)
 
-## Main UI
+## Features
 
-- `All colors`: global hue, tint, exposure, and chroma controls
-- `Neutrals`: separate handling for low-chroma colors with hue/exposure/contrast/chroma
-- `Separate control`: add focused controls for detected color families like teal, rose, or indigo
-- `Invert colors`: role-based theme switching for exploring light/dark variants
+- Explore color variations while preserving perceived lightness
+- Shift colors across the OKLCH spectrum without losing visual balance
+- Adjust neutral and near-neutral colors separately
+- Turn existing colors into a more complementary palette
+- Control hue, exposure, chroma, tint, and contrast in real time
+- Preview changes and apply them directly to the selected design
+- Experiment with light-to-dark and dark-to-light theme conversion
 
-## Development
+Theme conversion is still experimental and may not produce reliable results for every design.
 
-```bash
-npm install
-npm run check
-npm run build
-```
+## Tech Stack
 
-Load the plugin in Figma via `Plugins -> Development -> Import plugin from manifest...` and select:
+- [React](https://react.dev/) — plugin interface
+- [Culori](https://culorijs.org/) — color conversion and manipulation
+- [APCA](https://github.com/Myndex/apca-w3) — perceptual contrast calculations
+- [TypeScript](https://www.typescriptlang.org/) — application code
+- [Vite](https://vite.dev/) and [esbuild](https://esbuild.github.io/) — build tooling
 
-`/Users/a23/Desktop/bin/color_shuffler light/manifest.json`
+## More Plugins
 
-## Project structure
+You can also try [TinyPics — Fast Local Image Compressor](https://www.figma.com/community/plugin/1612595698368227712/tinypics-fast-local-image-compressor).
 
-- `src/plugin` — Figma plugin runtime, selection analysis, and canvas mutations
-- `src/ui` — React UI for controls and preview state
-- `src/shared` — shared color models, mapping types, and theme-flip logic
+## License
 
-## Notes
-
-- The plugin is tuned for iterative exploration, so previews are throttled/coalesced before applying changes to the canvas.
-- The repo intentionally ignores local build output, exports, and local assistant tooling.
+This project is licensed under the Creative Commons Attribution-NonCommercial
+4.0 International License (CC BY-NC 4.0). See [LICENSE](LICENSE) for the full license text.

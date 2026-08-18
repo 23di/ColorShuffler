@@ -85,6 +85,47 @@ export const DEFAULT_EXPLORE_SETTINGS: ExploreSettings = {
   },
 };
 
+const EXPOSURE_EASE_POWER = 1.35;
+
+export function applyExposureToLightness(lightness: number, exposure: number): number {
+  const base = clamp01(lightness);
+  const normalizedExposure = clamp(exposure / 100, -1, 1);
+  if (normalizedExposure === 0) return base;
+
+  // Ease the slider so darker colors do not collapse into black too early.
+  const amount = Math.pow(Math.abs(normalizedExposure), EXPOSURE_EASE_POWER);
+  if (normalizedExposure < 0) {
+    return clamp01(base * (1 - amount));
+  }
+
+  return clamp01(base + (1 - base) * amount);
+}
+
+export function resolveExposureForLightness(
+  lightness: number,
+  targetLightness: number,
+): number {
+  const base = clamp01(lightness);
+  const target = clamp01(targetLightness);
+  if (Math.abs(target - base) < 0.0001) {
+    return 0;
+  }
+
+  if (target < base) {
+    if (base <= 0.0001) {
+      return -100;
+    }
+    const amount = clamp01(1 - target / base);
+    return -Math.pow(amount, 1 / EXPOSURE_EASE_POWER) * 100;
+  }
+
+  if (base >= 0.9999) {
+    return 100;
+  }
+  const amount = clamp01((target - base) / (1 - base));
+  return Math.pow(amount, 1 / EXPOSURE_EASE_POWER) * 100;
+}
+
 function resolveHuePreset(
   color: OklchColor,
   preset: HuePreset,
@@ -123,7 +164,7 @@ function transformExploreColor(
   const band = detectToneBand(source.l);
   const bandAdjustment = settings.grading[band];
 
-  let lightness = clamp01(source.l + settings.exposure / 100);
+  let lightness = applyExposureToLightness(source.l, settings.exposure);
   lightness = clamp01(0.5 + (lightness - 0.5) * contrastFactor);
 
   const vibranceBoost =
@@ -199,4 +240,3 @@ export function buildExploreMapping(
 
   return mapping;
 }
-

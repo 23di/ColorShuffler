@@ -43,6 +43,8 @@ body,
   font-family: var(--font);
   font-size: 11px;
   line-height: 1.4;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .shell {
   position: relative;
@@ -64,6 +66,8 @@ body,
     var(--bg)
   );
   color: var(--text);
+  -webkit-user-select: none;
+  user-select: none;
 }
 .shell-inner {
   display: flex;
@@ -137,6 +141,21 @@ body,
 .main-toggle-row {
   gap: 10px;
   justify-content: flex-end;
+}
+.global-harmony-controls {
+  display: flex;
+  align-items: center;
+  justify-content: stretch;
+  gap: 8px;
+  padding: 2px 0 0;
+  width: 100%;
+}
+.global-harmony-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .range-field {
   display: flex;
@@ -367,9 +386,6 @@ body,
   flex-direction: column;
   gap: 10px;
 }
-.main-controls-disabled {
-  opacity: 0.5;
-}
 .hue-group-count {
   color: var(--text-2);
   font-weight: 500;
@@ -412,6 +428,159 @@ body,
 .hue-add-btn.is-added {
   color: var(--text-2);
 }
+.hue-wheel-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hue-wheel {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  align-self: center;
+  cursor: default;
+  touch-action: none;
+}
+.hue-wheel-disc,
+.hue-wheel-ring,
+.hue-wheel-neutral-orbit,
+.hue-wheel-overlay {
+  position: absolute;
+  inset: 0;
+}
+.hue-wheel-disc {
+  border-radius: 50%;
+  border: 0;
+  box-shadow: none;
+  opacity: 1;
+  cursor: grab;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.hue-wheel.is-master-dragging .hue-wheel-disc {
+  cursor: grabbing;
+}
+.hue-wheel-ring {
+  border-radius: 50%;
+  pointer-events: none;
+}
+.hue-wheel-overlay {
+  pointer-events: none;
+  overflow: visible;
+}
+.hue-wheel-spoke {
+  position: absolute;
+  width: 1px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transform-origin: 50% 100%;
+  transition:
+    top 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    background var(--transition-base);
+}
+.hue-wheel-spoke.is-active {
+  background: rgba(255, 255, 255, 0.24);
+}
+.hue-wheel-spoke-neutral {
+  background: rgba(255, 255, 255, 0.16);
+}
+.hue-wheel.is-dragging .hue-wheel-spoke {
+  transition: background var(--transition-base);
+}
+.hue-wheel-neutral-orbit {
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
+  pointer-events: none;
+}
+.hue-wheel-node,
+.hue-wheel-neutral {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  cursor: grab;
+  border: 2px solid rgba(255, 255, 255, 0.94);
+  background: var(--node-accent, color-mix(in srgb, white 18%, var(--bg-2)));
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.14),
+    0 2px 6px rgba(0, 0, 0, 0.18);
+  transition:
+    left 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform var(--transition-fast),
+    border-color var(--transition-base),
+    box-shadow var(--transition-base),
+    filter var(--transition-base);
+}
+.hue-wheel.is-dragging .hue-wheel-node,
+.hue-wheel.is-dragging .hue-wheel-neutral {
+  transition:
+    transform var(--transition-fast),
+    border-color var(--transition-base),
+    box-shadow var(--transition-base),
+    filter var(--transition-base);
+}
+.hue-wheel-node {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.hue-wheel-node:hover,
+.hue-wheel-neutral:hover {
+  transform: translate(-50%, -50%) scale(1.14);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow:
+    0 0 0 4px rgba(255, 255, 255, 0.16),
+    0 6px 14px rgba(0, 0, 0, 0.26);
+  filter: saturate(1.06) brightness(1.03);
+  z-index: 4;
+}
+.hue-wheel-node.is-active,
+.hue-wheel-neutral.is-active {
+  transform: translate(-50%, -50%) scale(1.16);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow:
+    0 0 0 5px rgba(255, 255, 255, 0.2),
+    0 8px 18px rgba(0, 0, 0, 0.3);
+  filter: saturate(1.08) brightness(1.04);
+  z-index: 5;
+}
+.hue-wheel-node.is-dragging,
+.hue-wheel-neutral.is-dragging,
+.hue-wheel-node:active,
+.hue-wheel-neutral:active {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.18);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow:
+    0 0 0 6px rgba(255, 255, 255, 0.24),
+    0 10px 22px rgba(0, 0, 0, 0.34);
+  filter: saturate(1.1) brightness(1.05);
+  z-index: 6;
+}
+.hue-wheel-node-group {
+  width: 18px;
+  height: 18px;
+}
+.hue-wheel-node-group.is-passive {
+  opacity: 1;
+}
+.hue-wheel-node-group.is-separated {
+  z-index: 2;
+}
+.hue-wheel-neutral {
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
 .range-head {
   display: flex;
   justify-content: space-between;
@@ -436,7 +605,7 @@ body,
   width: 100%;
   height: 8px;
   border-radius: 999px;
-  background: var(--bg-3);
+  background: var(--range-track-background, var(--bg-3));
   outline: none;
   cursor: pointer;
 }
@@ -448,29 +617,14 @@ body,
   opacity: 0.45;
 }
 .range-field input[type="range"].is-hue {
-  background: linear-gradient(
-    to right,
-    #0af5f5,
-    #238cf6,
-    #4545f7,
-    #993bf7,
-    #f631f6,
-    #f63194,
-    #f63131,
-    #f69431,
-    #f6f631,
-    #80f50a,
-    #0aeb0a,
-    #0af580,
-    #0af5f5
-  );
+  background: var(--range-track-background, var(--bg-3));
 }
 .range-field input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--text);
+  background: var(--range-thumb-color, var(--text));
   border: 2px solid var(--bg);
   box-shadow: 0 0 0 1px var(--border);
   cursor: pointer;
@@ -536,15 +690,41 @@ body,
 .select-field.is-compact {
   gap: 0;
 }
+.select-field.is-fill {
+  flex: 1 1 0;
+  min-width: 0;
+}
 .select-field-inline {
   display: inline-flex;
   align-items: center;
   gap: 0;
 }
+.select-field.is-fill .select-field-inline {
+  width: 100%;
+}
+.select-field.is-unstyled .select-field-inline {
+  min-height: 28px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  transition:
+    background var(--transition-base),
+    border-color var(--transition-base),
+    color var(--transition-base),
+    box-shadow var(--transition-base);
+}
+.select-field.is-unstyled:hover .select-field-inline {
+  background: color-mix(in srgb, var(--text) 8%, var(--bg-2));
+}
+.select-field.is-unstyled:focus-within .select-field-inline {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
 .select-field.is-unstyled select {
   min-width: 0;
   height: auto;
-  padding: 0;
+  padding: 0 4px 0 0;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -555,6 +735,25 @@ body,
   -webkit-appearance: none;
   text-indent: 0;
 }
+.select-field.is-fill select {
+  width: 100%;
+}
+.select-field select,
+.select-field option,
+.select-field optgroup {
+  background-color: var(--bg-2);
+  color: var(--text);
+}
+html[data-ui-color-scheme="dark"] .select-field select,
+html[data-ui-color-scheme="dark"] .select-field option,
+html[data-ui-color-scheme="dark"] .select-field optgroup {
+  color-scheme: dark;
+}
+html[data-ui-color-scheme="light"] .select-field select,
+html[data-ui-color-scheme="light"] .select-field option,
+html[data-ui-color-scheme="light"] .select-field optgroup {
+  color-scheme: light;
+}
 .select-field.is-unstyled .select-field-chevron {
   display: inline-flex;
   align-items: center;
@@ -562,7 +761,7 @@ body,
   color: var(--text-2);
   pointer-events: none;
   flex: 0 0 auto;
-  margin-left: -1px;
+  margin-left: 0;
 }
 .select-field.is-unstyled .select-field-chevron .icon-svg {
   width: 10px;
@@ -581,6 +780,14 @@ body,
 }
 .select-field select:focus {
   border-color: var(--accent);
+}
+.select-field select:disabled,
+.select-field.is-unstyled select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.select-field.is-unstyled select:disabled + .select-field-chevron {
+  opacity: 0.45;
 }
 .button-row {
   display: flex;
@@ -728,7 +935,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: var(--card-gap);
-  padding: var(--card-gap) var(--card-pad-x) var(--collapsible-safe-bottom);
+  padding: var(--card-gap) var(--card-pad-x) calc(var(--card-pad-y) + 2px);
 }
 .theme-settings-options {
   display: flex;
