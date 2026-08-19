@@ -1138,51 +1138,6 @@ function App() {
     [paletteAnchorHue, settings.hueShift],
   );
   const primaryChromaticScopeId = chromaticGroups[0]?.id ?? null;
-  const brandReferenceHue = useMemo(() => {
-    if (!primaryChromaticScopeId || primaryTintEnabled) {
-      return masterDisplayHue;
-    }
-
-    const primarySeparatedGroup = allExtraHueGroupByScopeId.get(primaryChromaticScopeId);
-    if (!primarySeparatedGroup) {
-      return masterDisplayHue;
-    }
-
-    return resolveExtraHueGroupDisplayHue(
-      resolveEffectiveExtraHueGroup(primarySeparatedGroup),
-      masterDisplayHue,
-    );
-  }, [
-    allExtraHueGroupByScopeId,
-    masterDisplayHue,
-    primaryChromaticScopeId,
-    primaryTintEnabled,
-  ]);
-  const brandReferenceLightness = useMemo(() => {
-    if (!primaryChromaticScopeId) {
-      return applyExposureToLightness(globalSample.l, settings.exposure);
-    }
-
-    const brandSample =
-      groupSampleById.get(primaryChromaticScopeId) ??
-      summarizeOklchSample(
-        groupColorsById.get(primaryChromaticScopeId) ?? [],
-        masterDisplayHue,
-      );
-    const primarySeparatedGroup = allExtraHueGroupByScopeId.get(primaryChromaticScopeId);
-    const brandLocalExposure = primarySeparatedGroup
-      ? resolveEffectiveExtraHueGroup(primarySeparatedGroup).exposure
-      : 0;
-    return applyExposureToLightness(brandSample.l, settings.exposure + brandLocalExposure);
-  }, [
-    allExtraHueGroupByScopeId,
-    globalSample.l,
-    groupColorsById,
-    groupSampleById,
-    masterDisplayHue,
-    primaryChromaticScopeId,
-    settings.exposure,
-  ]);
   const globalPreviewSample = useMemo(
     () =>
       previewSampleOklch(globalSample, {
@@ -1236,6 +1191,68 @@ function App() {
         : null,
     [activeChromaticScopeId, frameGroupById],
   );
+  const relationAnchorScopeId = activeChromaticScopeId ?? primaryChromaticScopeId;
+  const brandReferenceHue = useMemo(() => {
+    if (!relationAnchorScopeId || primaryTintEnabled) {
+      return masterDisplayHue;
+    }
+
+    const anchorGroup = frameGroupById.get(relationAnchorScopeId);
+    const separatedAnchor = allExtraHueGroupByScopeId.get(relationAnchorScopeId);
+    if (separatedAnchor) {
+      return resolveExtraHueGroupDisplayHue(
+        resolveEffectiveExtraHueGroup(separatedAnchor),
+        masterDisplayHue,
+      );
+    }
+
+    const fixedAnchorShift = fixedPassiveHueShiftByScopeId[relationAnchorScopeId];
+    if (fixedAnchorShift !== undefined) {
+      return normalizeHue(masterDisplayHue + fixedAnchorShift);
+    }
+
+    return anchorGroup
+      ? resolvePassiveGroupHue(
+          anchorGroup,
+          masterDisplayHue,
+          settings.hueShift,
+          primaryTintEnabled,
+        )
+      : masterDisplayHue;
+  }, [
+    allExtraHueGroupByScopeId,
+    fixedPassiveHueShiftByScopeId,
+    frameGroupById,
+    masterDisplayHue,
+    primaryTintEnabled,
+    relationAnchorScopeId,
+    settings.hueShift,
+  ]);
+  const brandReferenceLightness = useMemo(() => {
+    if (!relationAnchorScopeId) {
+      return applyExposureToLightness(globalSample.l, settings.exposure);
+    }
+
+    const brandSample =
+      groupSampleById.get(relationAnchorScopeId) ??
+      summarizeOklchSample(
+        groupColorsById.get(relationAnchorScopeId) ?? [],
+        brandReferenceHue,
+      );
+    const separatedAnchor = allExtraHueGroupByScopeId.get(relationAnchorScopeId);
+    const brandLocalExposure = separatedAnchor
+      ? resolveEffectiveExtraHueGroup(separatedAnchor).exposure
+      : 0;
+    return applyExposureToLightness(brandSample.l, settings.exposure + brandLocalExposure);
+  }, [
+    allExtraHueGroupByScopeId,
+    brandReferenceHue,
+    globalSample.l,
+    groupColorsById,
+    groupSampleById,
+    relationAnchorScopeId,
+    settings.exposure,
+  ]);
   const fixedMode = globalLinkedEnabled && globalLinkedHueMode === "manual";
   const neutralFreeMode = !globalLinkedEnabled && globalLinkedHueMode === "manual";
   const activeGlobalLinkMode = globalLinkedHueMode;
@@ -1255,12 +1272,17 @@ function App() {
     if (
       primaryTintEnabled ||
       globalLinkedHueMode === "manual" ||
-      !primaryChromaticScopeId
+      !relationAnchorScopeId
     ) {
       return next;
     }
 
-    chromaticGroups.forEach((group, index) => {
+    const relationGroups = [
+      ...chromaticGroups.filter((group) => group.id === relationAnchorScopeId),
+      ...chromaticGroups.filter((group) => group.id !== relationAnchorScopeId),
+    ];
+
+    relationGroups.forEach((group, index) => {
       if (!globalLinkedEnabled && allExtraHueGroupByScopeId.has(group.id)) {
         return;
       }
@@ -1278,7 +1300,7 @@ function App() {
     allExtraHueGroupByScopeId,
     globalLinkedEnabled,
     globalLinkedHueMode,
-    primaryChromaticScopeId,
+    relationAnchorScopeId,
     primaryTintEnabled,
   ]);
   const resolveRelationLightnessOffset = (
@@ -1291,7 +1313,7 @@ function App() {
       !relationLightnessEnabled ||
       isNeutralScope ||
       linkedRelationHue === undefined ||
-      scopeId === primaryChromaticScopeId
+      scopeId === relationAnchorScopeId
     ) {
       return 0;
     }
@@ -1476,7 +1498,7 @@ function App() {
     const globalRelationMapping = chromaticGroups.reduce<Record<string, ColorMappingEntry>>(
       (combined, group) => {
         const targetGroupHue = globalRelationHueByScopeId.get(group.id);
-        if (targetGroupHue === undefined || group.id === primaryChromaticScopeId) {
+        if (targetGroupHue === undefined || group.id === relationAnchorScopeId) {
           return combined;
         }
 
@@ -1690,7 +1712,7 @@ function App() {
     globalLinkedHueMode,
     groupColorsById,
     identityMappingByKey,
-    primaryChromaticScopeId,
+    relationAnchorScopeId,
     primaryHueSettings,
     primaryTintEnabled,
     relationLightnessEnabled,
