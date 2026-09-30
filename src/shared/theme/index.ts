@@ -28,21 +28,26 @@ export type ThemeTarget = "light" | "dark";
 export const DEFAULT_THEME_FLIP_SETTINGS: ThemeFlipSettings = {
   backgroundBrightness: 100,
   surfaceSeparation: 40,
-  accentSaturation: 90,
+  accentSaturation: 100,
   accentBrightness: 0,
   textContrast: 75,
   textWeight: 70,
+  iconWeight: 50,
   preserveButtonText: true,
 };
 
 export type { FlipRole, FlipDirection };
 
-function isTextRole(role: FlipRole): boolean {
+// Roles routed through the contrast-bisection pipeline (Phase 2): text and
+// foreground icons/curves. Both target a measured APCA contrast against the
+// already-transformed background instead of using fixed surface bands.
+function usesContrastPipeline(role: FlipRole): boolean {
   return (
     role === "text-primary" ||
     role === "text-secondary" ||
     role === "text-decorative" ||
-    role === "text-on-accent"
+    role === "text-on-accent" ||
+    role === "foreground-icon"
   );
 }
 
@@ -109,15 +114,17 @@ export function applyThemeFlip(
   const entriesByKey = new Map<string, ColorMappingEntry>();
 
   for (const c of classified) {
-    if (isTextRole(c.role)) continue;
+    if (usesContrastPipeline(c.role)) continue;
     const next = transformSurface(c, direction, settings);
     transformedOklchByKey.set(c.entry.key, next);
     entriesByKey.set(c.entry.key, materialize(c.entry, next, targetTheme));
   }
 
-  // Phase 2: text pass — uses transformed backgrounds.
+  // Phase 2: contrast-targeting pass (text + foreground icons) — uses
+  // already-transformed backgrounds so each foreground lands at the desired
+  // APCA contrast against its real, post-flip surface.
   for (const c of classified) {
-    if (!isTextRole(c.role)) continue;
+    if (!usesContrastPipeline(c.role)) continue;
     const bg = resolveTransformedBackground(
       c,
       transformedOklchByKey,

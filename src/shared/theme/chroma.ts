@@ -24,18 +24,19 @@ interface ChromaCaps {
 }
 
 const CHROMA_ROLE_CAPS: Record<FlipRole, ChromaCaps> = {
-  "surface-base": { cap: 0.02, directionBias: { toLight: 0.5, toDark: 0.8 } },
-  "surface-raised": { cap: 0.02, directionBias: { toLight: 0.5, toDark: 0.8 } },
-  "surface-overlay": { cap: 0.02, directionBias: { toLight: 0.5, toDark: 0.8 } },
-  border: { cap: 0.04, directionBias: { toLight: 0.6, toDark: 0.8 } },
-  divider: { cap: 0.04, directionBias: { toLight: 0.6, toDark: 0.8 } },
-  "chromatic-surface": { cap: 0.2, directionBias: { toLight: 0.9, toDark: 1.1 } },
-  "accent-chromatic": { cap: 0.24, directionBias: { toLight: 0.95, toDark: 1.15 } },
-  "text-primary": { cap: 0.1, directionBias: { toLight: 0.85, toDark: 0.95 } },
-  "text-secondary": { cap: 0.1, directionBias: { toLight: 0.85, toDark: 0.95 } },
-  "text-decorative": { cap: 0.14, directionBias: { toLight: 0.95, toDark: 1.0 } },
-  "text-on-accent": { cap: 0.12, directionBias: { toLight: 0.9, toDark: 1.0 } },
-  shadow: { cap: 0.05, directionBias: { toLight: 0.5, toDark: 0.7 } },
+  "surface-base": { cap: 0.02, directionBias: { toLight: 0.8, toDark: 0.95 } },
+  "surface-raised": { cap: 0.02, directionBias: { toLight: 0.8, toDark: 0.95 } },
+  "surface-overlay": { cap: 0.02, directionBias: { toLight: 0.8, toDark: 0.95 } },
+  border: { cap: 0.04, directionBias: { toLight: 0.85, toDark: 0.95 } },
+  divider: { cap: 0.04, directionBias: { toLight: 0.85, toDark: 0.95 } },
+  "chromatic-surface": { cap: 0.2, directionBias: { toLight: 0.96, toDark: 1.04 } },
+  "accent-chromatic": { cap: 0.24, directionBias: { toLight: 0.97, toDark: 1.06 } },
+  "foreground-icon": { cap: 0.14, directionBias: { toLight: 0.97, toDark: 1.0 } },
+  "text-primary": { cap: 0.1, directionBias: { toLight: 0.93, toDark: 0.98 } },
+  "text-secondary": { cap: 0.1, directionBias: { toLight: 0.93, toDark: 0.98 } },
+  "text-decorative": { cap: 0.14, directionBias: { toLight: 0.97, toDark: 1.0 } },
+  "text-on-accent": { cap: 0.12, directionBias: { toLight: 0.95, toDark: 1.0 } },
+  shadow: { cap: 0.05, directionBias: { toLight: 0.7, toDark: 0.85 } },
 };
 
 export function remapChroma(

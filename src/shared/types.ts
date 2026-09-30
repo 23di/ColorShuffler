@@ -86,6 +86,8 @@ export interface ThemeColorContext {
   textBackgroundHex?: string;
   /** True if the text color was observed at least once on a chromatic (c > 0.05) background. */
   hasChromaticTextBackground?: boolean;
+  /** True if the color is predominantly a foreground fill on icon-type nodes (VECTOR, BOOLEAN_OPERATION, etc.) with measured APCA contrast — logo curves, icon shapes. */
+  hasForegroundFillContext?: boolean;
 }
 
 export interface ThemeDetectionSummary {
@@ -106,6 +108,8 @@ export interface ThemeFlipSettings {
   textContrast: number;
   /** 0..100 — how far past the APCA threshold text is pulled toward the extreme pole. */
   textWeight: number;
+  /** 0..100 — how far past the APCA threshold icons/fills are pulled toward the extreme pole. */
+  iconWeight: number;
   /**
    * When true, near-pole text (pure white / pure black) that was ever observed
    * on a chromatic background (e.g. button labels, badge text) keeps its source

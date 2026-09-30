@@ -55,6 +55,11 @@ function textChromaTarget(
   } else if (role === "text-decorative") {
     bias = direction === "toLight" ? 0.95 : 1.0;
     cap = direction === "toLight" ? 0.12 : 0.14;
+  } else if (role === "foreground-icon") {
+    // Icons can carry slightly more chroma than body text — they're shape-
+    // forward, not legibility-bound at small font sizes.
+    bias = direction === "toLight" ? 0.95 : 1.0;
+    cap = 0.14;
   }
   return clamp(sourceC * saturation * bias, 0, cap);
 }
@@ -282,12 +287,16 @@ export function resolveTextOklch(input: ResolveTextInput): OklchColor {
   const pole = polarity === "dark-text" ? 0.02 : 0.98;
   // Primary text pulls all the way to pole; secondary/on-accent stay closer
   // to the APCA-solved L so hierarchy between text roles is preserved.
+  // Icons sit between primary and secondary — visible but not pole-extreme,
+  // so a colored icon doesn't get crushed to near-black on light themes.
   const roleStrength =
     classified.role === "text-secondary"
       ? 0.3
       : classified.role === "text-on-accent"
         ? 0.6
-        : 1.0;
+        : classified.role === "foreground-icon"
+          ? clamp(settings.iconWeight / 100, 0, 1)
+          : 1.0;
   const finalL = result.converged
     ? lerp(result.l, pole, depth * roleStrength)
     : result.l;

@@ -47,6 +47,7 @@ type ExtraHueGroupLinkMode =
   | "manual"
   | "monochrome"
   | "balanced"
+  | "even"
   | "clustered"
   | "accent-support"
   | "complement"
@@ -89,6 +90,7 @@ const EXTRA_HUE_LINK_MODE_OPTIONS: Array<{
   { value: "manual", label: "Fixed" },
   { value: "monochrome", label: "Monochrome" },
   { value: "balanced", label: "Balanced" },
+  { value: "even", label: "Evenly spaced" },
   { value: "clustered", label: "Clustered" },
   { value: "accent-support", label: "Accent + support" },
   { value: "complement", label: "Complementary" },
@@ -225,6 +227,8 @@ function extraHueGroupOffset(relation: ExtraHueGroupLinkMode): number {
       return 0;
     case "balanced":
       return 24;
+    case "even":
+      return 0;
     case "clustered":
       return 18;
     case "accent-support":
@@ -291,6 +295,8 @@ function globalRelationOffsets(mode: ExtraHueGroupLinkMode): number[] {
       return [0];
     case "balanced":
       return [24, -24, 54, -54, 148, -148, 178];
+    case "even":
+      return [];
     case "clustered":
       return [18, -18, 36, -36, 60, -60, 150];
     case "accent-support":
@@ -553,6 +559,7 @@ function createIdentityMappingEntry(color: AnalysisColor): ColorMappingEntry {
 function buildFrameGroups(
   colors: AnalysisColor[],
   neutralThreshold: number,
+  splitChromaticColors = false,
 ): FrameGroup[] {
   const grouped = new Map<
     string,
@@ -569,9 +576,12 @@ function buildFrameGroups(
   for (const color of colors) {
     const chroma = color.oklch.c;
     const isNeutral = isNearNeutralChroma(chroma, neutralThreshold);
-    const family = isNeutral
+    const hueFamily = isNeutral
       ? { id: "neutral", name: "Neutrals" }
       : familyFromHue(color.oklch.h, chroma);
+    const family = !isNeutral && splitChromaticColors
+      ? { id: `color:${color.key}`, name: `${hueFamily.name} ${color.hex}` }
+      : hueFamily;
     const type = isNeutral ? "neutral" : "chromatic";
     const existing = grouped.get(family.id);
     if (existing) {
@@ -1047,8 +1057,12 @@ function App() {
     [deferredAnalysis, effectiveExploreSettings.neutralThreshold],
   );
   const frameGroups = useMemo(
-    () => buildFrameGroups(deferredAnalysis?.colors ?? [], effectiveExploreSettings.neutralThreshold),
-    [deferredAnalysis, effectiveExploreSettings.neutralThreshold],
+    () => buildFrameGroups(
+      deferredAnalysis?.colors ?? [],
+      effectiveExploreSettings.neutralThreshold,
+      globalLinkedHueMode === "even",
+    ),
+    [deferredAnalysis, effectiveExploreSettings.neutralThreshold, globalLinkedHueMode],
   );
   const chromaticGroups = useMemo(
     () => frameGroups.filter((group) => group.type === "chromatic"),
@@ -1182,7 +1196,9 @@ function App() {
       return activeHueNodeId;
     }
 
-    return chromaticExtraHueGroups[0]?.scopeId ?? chromaticGroups[0]?.id ?? null;
+    return chromaticExtraHueGroups.find((group) => frameGroupById.has(group.scopeId))?.scopeId
+      ?? chromaticGroups[0]?.id
+      ?? null;
   }, [activeHueNodeId, chromaticExtraHueGroups, chromaticGroups, frameGroupById]);
   const activeChromaticScope = useMemo(
     () =>
@@ -1289,7 +1305,9 @@ function App() {
 
       next.set(
         group.id,
-        resolveLinkedRelationHue(globalLinkedHueMode, brandReferenceHue, index),
+        globalLinkedHueMode === "even"
+          ? normalizeHue(brandReferenceHue + (360 * index) / relationGroups.length)
+          : resolveLinkedRelationHue(globalLinkedHueMode, brandReferenceHue, index),
       );
     });
 
@@ -2835,6 +2853,18 @@ function App() {
                   resetValue={DEFAULT_THEME_FLIP_SETTINGS.textWeight}
                   onChange={(value) =>
                     setThemeSettings((current) => ({ ...current, textWeight: value }))
+                  }
+                />
+                <RangeField
+                  label="Icon weight"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={themeSettings.iconWeight}
+                  display={`${themeSettings.iconWeight}%`}
+                  resetValue={DEFAULT_THEME_FLIP_SETTINGS.iconWeight}
+                  onChange={(value) =>
+                    setThemeSettings((current) => ({ ...current, iconWeight: value }))
                   }
                 />
                 <div className="theme-settings-options">

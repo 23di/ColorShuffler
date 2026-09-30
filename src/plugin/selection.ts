@@ -247,9 +247,17 @@ function aggregateContextFor(sourceKind: SourceKind): "text" | "paint" {
 const TEXT_ACCENT_CONTEXT = "text_accent" as const;
 const CHROMATIC_BG_THRESHOLD = 0.05;
 
+// Memoized — called in hot paths (once per paint and per text segment).
+// Unmemoized this was pushing Figma to noticeable slowdowns on large docs.
+const chromaticBackgroundCache = new Map<string, boolean>();
 function isChromaticBackground(bg: SerializedColor | null | undefined): boolean {
   if (!bg) return false;
-  return rgbToOklch(bg).c > CHROMATIC_BG_THRESHOLD;
+  const key = buildColorKey(bg);
+  const cached = chromaticBackgroundCache.get(key);
+  if (cached !== undefined) return cached;
+  const result = rgbToOklch(bg).c > CHROMATIC_BG_THRESHOLD;
+  chromaticBackgroundCache.set(key, result);
+  return result;
 }
 
 function recordColor(
@@ -530,15 +538,23 @@ function inspectPaintArray(
   backgroundCache: Map<string, SerializedColor | null>,
   textContexts?: Map<string, TextContextAggregate>,
   foregroundContexts?: Map<string, ForegroundContextAggregate>,
+  surfaceFillKeys?: Set<string>,
 ): void {
   const textBackground =
     node.type === "TEXT" && property === "fills"
       ? getNearestBackground(node, backgroundCache)
       : null;
-  const localBackground =
-    node.type !== "TEXT" && isForegroundIconCandidate(node, property)
+  const isIconCandidateFill =
+    property === "fills" &&
+    node.type !== "TEXT" &&
+    isForegroundIconCandidate(node, property);
+  const localBackground = isIconCandidateFill
+    ? getNearestBackground(node, backgroundCache)
+    : node.type !== "TEXT" && property === "strokes"
       ? getNearestBackground(node, backgroundCache)
       : null;
+  const tracksSurfaceFill =
+    property === "fills" && node.type !== "TEXT" && !isIconCandidateFill;
   paints.forEach((paint, paintIndex) => {
     if (!paintVisible(paint)) return;
 
@@ -562,6 +578,9 @@ function inspectPaintArray(
         if (contrast >= 45) {
           recordSurfaceContext(foregroundContexts, sourceKey, rgb, localBackground);
         }
+      }
+      if (tracksSurfaceFill && surfaceFillKeys) {
+        surfaceFillKeys.add(sourceKey);
       }
       bindings.push({
         kind: "solid",
@@ -593,6 +612,9 @@ function inspectPaintArray(
         if (contrast >= 45) {
           recordSurfaceContext(foregroundContexts, sourceKey, average, localBackground);
         }
+      }
+      if (tracksSurfaceFill && surfaceFillKeys) {
+        surfaceFillKeys.add(sourceKey);
       }
       bindings.push({
         kind: "gradient",
@@ -687,6 +709,7 @@ function buildSummary(
   layerCount: number,
   textContexts: Map<string, TextContextAggregate>,
   foregroundContexts: Map<string, ForegroundContextAggregate>,
+  surfaceFillKeys: ReadonlySet<string>,
   themeDetection?: ThemeDetectionSummary,
 ): SelectionAnalysisSummary {
   const provisionalColors = [...aggregates.entries()].map(([key, aggregate]) => ({
@@ -709,7 +732,6 @@ function buildSummary(
         const textContext = textContexts.get(color.key);
         const foregroundContext = foregroundContexts.get(color.key);
         const preferredContext = textContext ?? foregroundContext;
-        const CHROMATIC_BG_THRESHOLD = 0.05;
         let dominantBackground: { rgb: SerializedColor; count: number } | null = null;
         let hasChromaticTextBackground = false;
         if (preferredContext) {
@@ -718,7 +740,7 @@ function buildSummary(
             const dominantContrast = dominantBackground
               ? Math.abs(calculateApcaContrast(color.rgb, dominantBackground.rgb))
               : -1;
-            if (rgbToOklch(entry.rgb).c > CHROMATIC_BG_THRESHOLD) {
+            if (isChromaticBackground(entry.rgb)) {
               hasChromaticTextBackground = true;
             }
             if (
@@ -759,10 +781,20 @@ function buildSummary(
           } satisfies ThemeColorContext;
         }
 
+        // Flag fill-only colors that are exclusively foreground on icon-type
+        // nodes. If the same color appears anywhere as a fill on a non-icon
+        // node (FRAME / RECTANGLE / COMPONENT / etc.) it's treated as a
+        // surface and is NOT classified as foreground-fill, even when some
+        // usages happen to be high-contrast vector icons.
+        const hasSurfaceFillUsage = surfaceFillKeys.has(color.key);
+        const hasForegroundFillContext =
+          !!foregroundContext && !textContext && !hasSurfaceFillUsage;
+
         return {
           kind: saturation > 0.18 ? "chromatic" : "neutral",
           saturation,
           ...textMeta,
+          ...(hasForegroundFillContext && { hasForegroundFillContext: true }),
         } satisfies ThemeColorContext;
       })(),
     }))
@@ -788,6 +820,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
   const aggregates = new Map<string, ColorAggregate>();
   const textContexts = new Map<string, TextContextAggregate>();
   const foregroundContexts = new Map<string, ForegroundContextAggregate>();
+  const surfaceFillKeys = new Set<string>();
   const bindings: NodeBinding[] = [];
   const originalStates = new Map<string, NodeOriginalState>();
   const nodeById = new Map<string, SceneNode>();
@@ -814,6 +847,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
         backgroundCache,
         textContexts,
         foregroundContexts,
+        surfaceFillKeys,
       );
       if (node.type !== "TEXT") {
         const background = pickVisiblePaintColor(node.fills);
@@ -850,6 +884,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
         backgroundCache,
         textContexts,
         foregroundContexts,
+        surfaceFillKeys,
       );
     }
 
@@ -889,6 +924,7 @@ export function extractSelectionAnalysis(): SelectionAnalysisInternal | null {
       nodes.length,
       textContexts,
       foregroundContexts,
+      surfaceFillKeys,
       themeDetection,
     ),
     bindings,

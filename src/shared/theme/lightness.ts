@@ -23,8 +23,8 @@ import type { ClassifiedColor, FlipDirection, FlipRole } from "./roles";
 //   soft      = where mainBg lands at brightness=0 (soft light/dark gray)
 //   tierStep  = L delta per tier unit at separation=100 (sign pushes away from pole)
 const SURFACE_ANCHOR = {
-  toLight: { pole: 1.0, soft: 0.9, tierStep: -0.07 },
-  toDark: { pole: 0.02, soft: 0.15, tierStep: 0.07 },
+  toLight: { pole: 1.0, soft: 0.9, tierStep: -0.12 },
+  toDark: { pole: 0.02, soft: 0.15, tierStep: 0.12 },
 } as const;
 
 // Chromatic roles float inside their own safe band, independent of tiers.

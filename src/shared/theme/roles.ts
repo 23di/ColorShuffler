@@ -16,6 +16,7 @@ export type FlipRole =
   | "divider"
   | "chromatic-surface"
   | "accent-chromatic"
+  | "foreground-icon"
   | "text-primary"
   | "text-secondary"
   | "text-decorative"
@@ -61,6 +62,29 @@ function isStrokeLike(summary: ColorRecordSummary | undefined): boolean {
   return kinds.every(
     (kind) => kind === "stroke" || kind === "gradient-stroke",
   );
+}
+
+// Stroke-only colors that were observed as foreground content with measurable
+// contrast against a recorded background — i.e. icon strokes / vector glyphs,
+// not thin 1px dividers. These should preserve foreground visibility instead
+// of being pushed to the border tier.
+function isForegroundIconLike(summary: ColorRecordSummary | undefined): boolean {
+  if (!isStrokeLike(summary)) return false;
+  const theme = summary?.theme;
+  if (!theme) return false;
+  return theme.textBackground !== undefined && Number.isFinite(theme.originalLc);
+}
+
+// Fill-only colors on shape nodes (VECTOR, BOOLEAN_OPERATION, etc.) with
+// measured contrast against a detected background — logo curves, icon fills.
+// Requires hasForegroundFillContext to be set in the summary, which is only
+// true when the majority of usages of this color are foreground fills on
+// icon-type nodes (not background surfaces sharing the same color).
+function isForegroundFillLike(summary: ColorRecordSummary | undefined): boolean {
+  const kinds = summary?.sourceKinds ?? [];
+  if (kinds.length === 0) return false;
+  if (!kinds.every((kind) => kind === "fill" || kind === "gradient-fill")) return false;
+  return summary?.theme?.hasForegroundFillContext === true;
 }
 
 function isNeutralByChroma(
@@ -129,6 +153,8 @@ export function classifyRoles(
       role = "shadow";
     } else if (isTextLike(summary)) {
       role = classifyTextRole(summary, backgroundOklch);
+    } else if (isForegroundIconLike(summary) || isForegroundFillLike(summary)) {
+      role = "foreground-icon";
     } else {
       role = classifySurfaceRole(summary, sourceOklch);
     }

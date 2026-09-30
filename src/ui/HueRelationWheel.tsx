@@ -28,7 +28,7 @@ const WHEEL_SIZE = 220;
 const WHEEL_CENTER = WHEEL_SIZE / 2;
 const GROUP_NODE_SIZE = 18;
 const MIN_GROUP_RADIUS = 36;
-const RADIUS_STEP = 4;
+const NODE_GAP = GROUP_NODE_SIZE + 3;
 const NEUTRAL_RING_RADIUS = 32;
 const MAX_GROUP_RADIUS = WHEEL_CENTER - GROUP_NODE_SIZE / 2 - 1;
 
@@ -52,12 +52,6 @@ function hueFromPointer(
   const x = event.clientX - rect.left - rect.width / 2;
   const y = event.clientY - rect.top - rect.height / 2;
   return normalizeHue((Math.atan2(y, x) * 180) / Math.PI + 90);
-}
-
-function spreadOffset(index: number): number {
-  if (index === 0) return 0;
-  const step = Math.ceil(index / 2) * RADIUS_STEP;
-  return index % 2 === 1 ? step : -step;
 }
 
 function clamp01(value: number): number {
@@ -117,30 +111,54 @@ export function HueRelationWheel({
   );
 
   const placementById = useMemo(() => {
-    const bucketCounts = new Map<number, number>();
-    const next = new Map<string, number>();
-    const sorted = [...groupNodes].sort((left, right) => left.displayHue - right.displayHue);
+    const next = new Map<string, { x: number; y: number; hue: number; radius: number }>();
+    const placed: Array<{ x: number; y: number }> = [];
+    const radialOffsets = [
+      0,
+      NODE_GAP,
+      -NODE_GAP,
+      NODE_GAP * 2,
+      -NODE_GAP * 2,
+      NODE_GAP * 3,
+      -NODE_GAP * 3,
+    ];
+    const angleOffsets = [0, 12, -12, 24, -24, 36, -36, 48, -48];
 
-    for (const node of sorted) {
-      const bucket = Math.round(normalizeHue(node.displayHue) / 12);
-      const index = bucketCounts.get(bucket) ?? 0;
-      bucketCounts.set(bucket, index + 1);
-      next.set(node.id, spreadOffset(index));
+    for (const node of groupNodes) {
+      const chromaWeight = clamp01(node.radialWeight ?? 0);
+      const baseRadius = MIN_GROUP_RADIUS + chromaWeight * (MAX_GROUP_RADIUS - MIN_GROUP_RADIUS);
+      const target = angleToCartesian(node.displayHue, baseRadius);
+      let best: { x: number; y: number; hue: number; radius: number; cost: number } | null = null;
+
+      for (const angleOffset of angleOffsets) {
+        for (const radialOffset of radialOffsets) {
+          const radius = baseRadius + radialOffset;
+          if (radius < MIN_GROUP_RADIUS || radius > MAX_GROUP_RADIUS) continue;
+          const hue = normalizeHue(node.displayHue + angleOffset);
+          const position = angleToCartesian(hue, radius);
+          const minDistance = placed.reduce(
+            (min, other) => Math.min(min, Math.hypot(position.x - other.x, position.y - other.y)),
+            Infinity,
+          );
+          if (minDistance < NODE_GAP) continue;
+          const cost = Math.hypot(position.x - target.x, position.y - target.y);
+          if (!best || cost < best.cost) {
+            best = { ...position, hue, radius, cost };
+          }
+        }
+      }
+
+      const placement = best ?? {
+        ...target,
+        hue: node.displayHue,
+        radius: baseRadius,
+      };
+      placed.push(placement);
+      next.set(node.id, placement);
     }
 
     return next;
   }, [groupNodes]);
-
-  const resolveGroupRadius = (node: HueRelationWheelNode & { kind: "group"; displayHue: number }) => {
-    const chromaWeight = clamp01(node.radialWeight ?? 0);
-    const baseRadius =
-      MIN_GROUP_RADIUS + chromaWeight * (MAX_GROUP_RADIUS - MIN_GROUP_RADIUS);
-    return clamp(
-      baseRadius + (placementById.get(node.id) ?? 0),
-      MIN_GROUP_RADIUS,
-      MAX_GROUP_RADIUS,
-    );
-  };
 
   useEffect(() => {
     const canvas = discCanvasRef.current;
@@ -312,12 +330,13 @@ export function HueRelationWheel({
         />
         <div className="hue-wheel-overlay" aria-hidden="true">
           {groupNodes.map((node) => {
-            const radius = resolveGroupRadius(node);
+            const placement = placementById.get(node.id);
+            if (!placement) return null;
             return (
               <div
                 key={`spoke-${node.id}`}
                 className={`hue-wheel-spoke${activeId === node.id ? " is-active" : ""}`}
-                style={spokeStyle(node.displayHue, radius)}
+                style={spokeStyle(placement.hue, placement.radius)}
               />
             );
           })}
@@ -333,8 +352,8 @@ export function HueRelationWheel({
         </div>
 
         {groupNodes.map((node) => {
-          const radius = resolveGroupRadius(node);
-          const position = angleToCartesian(node.displayHue, radius);
+          const position = placementById.get(node.id);
+          if (!position) return null;
           const style = {
             left: `${position.x}px`,
             top: `${position.y}px`,
@@ -368,8 +387,8 @@ export function HueRelationWheel({
               style={style}
               aria-label={title}
               title={title}
-              onMouseEnter={() => onActiveChange?.(node.id)}
               onClick={() => {
+                onActiveChange?.(node.id);
                 if (!node.isInteractive && node.canActivate) {
                   onGroupActivate(node.id);
                 }
